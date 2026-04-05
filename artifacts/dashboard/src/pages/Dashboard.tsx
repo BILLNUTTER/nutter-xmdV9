@@ -8,21 +8,21 @@ import {
 } from "@/lib/api";
 
 const TOGGLE_FEATURES = [
-  { key: "anticall", label: "Anti Call", icon: "📵", desc: "Reject incoming calls automatically", group: "Protection", actionKey: null },
-  { key: "antilink", label: "Anti Link", icon: "🔗", desc: "Delete messages with links in groups (bot must be admin)", group: "Protection", actionKey: "antilinkAction" },
-  { key: "antisticker", label: "Anti Sticker", icon: "🎭", desc: "Delete sticker messages in groups (bot must be admin)", group: "Protection", actionKey: "antistickerAction" },
-  { key: "antitag", label: "Anti Group Tag", icon: "🏷️", desc: "Delete messages containing WhatsApp group invite links", group: "Protection", actionKey: "antitagAction" },
-  { key: "antibadword", label: "Anti Bad Word", icon: "🤬", desc: "Delete messages with banned words (bot must be admin)", group: "Protection", actionKey: "antibadwordAction" },
-  { key: "antispam", label: "Anti Spam", icon: "🛡️", desc: "Warn & act on rapid message flooding (bot must be admin)", group: "Protection", actionKey: "antispamAction" },
-  { key: "antidelete", label: "Anti Delete", icon: "🔄", desc: "Recover deleted messages in groups", group: "Protection", actionKey: null },
   { key: "chatbot", label: "Auto Reply", icon: "🤖", desc: "Auto-reply to DMs when away", group: "Automation", actionKey: null },
   { key: "autoread", label: "Auto Read", icon: "👁️", desc: "Auto-read all incoming messages", group: "Automation", actionKey: null },
   { key: "alwaysonline", label: "Always Online", icon: "🟢", desc: "Stay always online on WhatsApp", group: "Automation", actionKey: null },
   { key: "autoviewstatus", label: "Auto View Status", icon: "👀", desc: "Auto-view all status updates", group: "Automation", actionKey: null },
   { key: "autolikestatus", label: "Auto Like Status", icon: "❤️", desc: "React to status updates", group: "Automation", actionKey: null },
   { key: "autotype", label: "Typing Indicator", icon: "⌨️", desc: "Show typing when responding", group: "Automation", actionKey: null },
-  { key: "welcome", label: "Welcome Message", icon: "👋", desc: "Greet new members (bot must be admin)", group: "Groups", actionKey: null },
-  { key: "goodbye", label: "Goodbye Message", icon: "💫", desc: "Farewell on leave (bot must be admin)", group: "Groups", actionKey: null },
+  { key: "anticall", label: "Call Blocker", icon: "📵", desc: "Auto-reject incoming voice & video calls", group: "Chat", actionKey: null },
+  { key: "antidelete", label: "Ghost Messages", icon: "👻", desc: "Reveal deleted messages before they disappear", group: "Chat", actionKey: null },
+  { key: "welcome", label: "Welcome Members", icon: "🎉", desc: "Send a greeting when a new member joins (bot must be admin)", group: "Chat", actionKey: null },
+  { key: "goodbye", label: "Farewell Members", icon: "🚪", desc: "Send a message when a member leaves (bot must be admin)", group: "Chat", actionKey: null },
+  { key: "antilink", label: "Anti Link", icon: "🔗", desc: "Delete messages with links in groups (bot must be admin)", group: "Protection", actionKey: "antilinkAction" },
+  { key: "antisticker", label: "Anti Sticker", icon: "🎭", desc: "Delete sticker messages in groups (bot must be admin)", group: "Protection", actionKey: "antistickerAction" },
+  { key: "antitag", label: "Anti Group Tag", icon: "🏷️", desc: "Delete messages containing WhatsApp group invite links", group: "Protection", actionKey: "antitagAction" },
+  { key: "antibadword", label: "Anti Bad Word", icon: "🤬", desc: "Delete messages with banned words (bot must be admin)", group: "Protection", actionKey: "antibadwordAction" },
+  { key: "antispam", label: "Anti Spam", icon: "🛡️", desc: "Warn & act on rapid message flooding (bot must be admin)", group: "Protection", actionKey: "antispamAction" },
 ];
 
 type LinkMode = "qr" | "pair" | null;
@@ -473,7 +473,7 @@ export default function Dashboard() {
                   <div style={{ textAlign: "center", padding: "3rem", color: C.muted }}>Loading settings...</div>
                 ) : (
                   <>
-                    {(["Automation", "Advanced", "Groups", "Protection"] as string[]).map(group => {
+                    {(["Automation", "Advanced", "Chat", "Protection"] as string[]).map(group => {
                       if (group === "Advanced") {
                         return (
                           <div key="advanced" style={{ marginBottom: "1.5rem", background: C.card, border: `1px solid ${C.border}`, borderRadius: "1rem", padding: "1.75rem" }}>
@@ -503,7 +503,7 @@ export default function Dashboard() {
                       return (
                         <div key={group} style={{ marginBottom: "1.5rem" }}>
                           <h3 style={{ color: "#94a3b8", fontSize: "0.78rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.75rem" }}>
-                            {group === "Protection" ? "🛡️" : group === "Automation" ? "⚡" : "👥"} {group}
+                            {group === "Protection" ? "🛡️" : group === "Automation" ? "⚡" : group === "Chat" ? "💬" : "👥"} {group === "Chat" ? "Chat & Group Controls" : group}
                           </h3>
                           <div style={{ display: "grid", gap: "0.65rem", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
                             {features.map(feat => {
