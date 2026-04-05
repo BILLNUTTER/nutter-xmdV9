@@ -8,21 +8,22 @@ import {
 } from "@/lib/api";
 
 const TOGGLE_FEATURES = [
-  { key: "chatbot", label: "Auto Reply", icon: "🤖", desc: "Auto-reply to DMs when away", group: "Automation", actionKey: null },
-  { key: "autoread", label: "Auto Read", icon: "👁️", desc: "Auto-read all incoming messages", group: "Automation", actionKey: null },
-  { key: "alwaysonline", label: "Always Online", icon: "🟢", desc: "Stay always online on WhatsApp", group: "Automation", actionKey: null },
-  { key: "autoviewstatus", label: "Auto View Status", icon: "👀", desc: "Auto-view all status updates", group: "Automation", actionKey: null },
-  { key: "autolikestatus", label: "Auto Like Status", icon: "❤️", desc: "React to status updates", group: "Automation", actionKey: null },
-  { key: "autotype", label: "Typing Indicator", icon: "⌨️", desc: "Show typing when responding", group: "Automation", actionKey: null },
-  { key: "anticall", label: "Call Blocker", icon: "📵", desc: "Auto-reject incoming voice & video calls", group: "Chat", actionKey: null },
-  { key: "antidelete", label: "Ghost Messages", icon: "👻", desc: "Reveal deleted messages before they disappear", group: "Chat", actionKey: null },
-  { key: "welcome", label: "Welcome Members", icon: "🎉", desc: "Send a greeting when a new member joins (bot must be admin)", group: "Chat", actionKey: null },
-  { key: "goodbye", label: "Farewell Members", icon: "🚪", desc: "Send a message when a member leaves (bot must be admin)", group: "Chat", actionKey: null },
-  { key: "antilink", label: "Anti Link", icon: "🔗", desc: "Delete messages with links in groups (bot must be admin)", group: "Protection", actionKey: "antilinkAction" },
-  { key: "antisticker", label: "Anti Sticker", icon: "🎭", desc: "Delete sticker messages in groups (bot must be admin)", group: "Protection", actionKey: "antistickerAction" },
-  { key: "antitag", label: "Anti Group Tag", icon: "🏷️", desc: "Delete messages containing WhatsApp group invite links", group: "Protection", actionKey: "antitagAction" },
-  { key: "antibadword", label: "Anti Bad Word", icon: "🤬", desc: "Delete messages with banned words (bot must be admin)", group: "Protection", actionKey: "antibadwordAction" },
-  { key: "antispam", label: "Anti Spam", icon: "🛡️", desc: "Warn & act on rapid message flooding (bot must be admin)", group: "Protection", actionKey: "antispamAction" },
+  { key: "chatbot", label: "Auto Reply", icon: "🤖", desc: "Auto-reply to DMs when away", group: "Automation", actionKey: null, actionOptions: null },
+  { key: "autoread", label: "Auto Read", icon: "👁️", desc: "Auto-read all incoming messages", group: "Automation", actionKey: null, actionOptions: null },
+  { key: "alwaysonline", label: "Always Online", icon: "🟢", desc: "Stay always online on WhatsApp", group: "Automation", actionKey: null, actionOptions: null },
+  { key: "autoviewstatus", label: "Auto View Status", icon: "👀", desc: "Auto-view all status updates", group: "Automation", actionKey: null, actionOptions: null },
+  { key: "autolikestatus", label: "Auto Like Status", icon: "❤️", desc: "React to status updates", group: "Automation", actionKey: null, actionOptions: null },
+  { key: "autotype", label: "Fake Presence", icon: "💬", desc: "Show a fake typing or recording indicator whenever someone messages you", group: "Automation", actionKey: "autotypeMode",
+    actionOptions: [{ v: "typing", label: "⌨️ Typing" }, { v: "recording", label: "🎤 Recording" }] },
+  { key: "anticall", label: "Call Blocker", icon: "📵", desc: "Auto-reject incoming voice & video calls", group: "Chat", actionKey: null, actionOptions: null },
+  { key: "antidelete", label: "Ghost Messages", icon: "👻", desc: "Reveal deleted messages before they disappear", group: "Chat", actionKey: null, actionOptions: null },
+  { key: "welcome", label: "Welcome Members", icon: "🎉", desc: "Send a greeting when a new member joins (bot must be admin)", group: "Chat", actionKey: null, actionOptions: null },
+  { key: "goodbye", label: "Farewell Members", icon: "🚪", desc: "Send a message when a member leaves (bot must be admin)", group: "Chat", actionKey: null, actionOptions: null },
+  { key: "antilink", label: "Anti Link", icon: "🔗", desc: "Delete messages with links in groups (bot must be admin)", group: "Protection", actionKey: "antilinkAction", actionOptions: null },
+  { key: "antisticker", label: "Anti Sticker", icon: "🎭", desc: "Delete sticker messages in groups (bot must be admin)", group: "Protection", actionKey: "antistickerAction", actionOptions: null },
+  { key: "antitag", label: "Anti Group Tag", icon: "🏷️", desc: "Delete messages containing WhatsApp group invite links", group: "Protection", actionKey: "antitagAction", actionOptions: null },
+  { key: "antibadword", label: "Anti Bad Word", icon: "🤬", desc: "Delete messages with banned words (bot must be admin)", group: "Protection", actionKey: "antibadwordAction", actionOptions: null },
+  { key: "antispam", label: "Anti Spam", icon: "🛡️", desc: "Warn & act on rapid message flooding (bot must be admin)", group: "Protection", actionKey: "antispamAction", actionOptions: null },
 ];
 
 type LinkMode = "qr" | "pair" | null;
@@ -536,37 +537,46 @@ export default function Dashboard() {
                                       }} />
                                     </div>
                                   </div>
-                                  {/* Action selector — always visible for actionable protections */}
-                                  {feat.actionKey && (
-                                    <div style={{ marginTop: "0.65rem" }}>
-                                      <div style={{ color: C.muted, fontSize: "0.67rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.35rem" }}>Action when triggered:</div>
-                                      <div style={{ display: "flex", gap: "0.4rem" }}>
-                                        {[
-                                          { v: "delete", label: "🗑 Delete only" },
-                                          { v: "delete_kick", label: "🚫 Delete + Kick" },
-                                        ].map(opt => (
-                                          <button
-                                            key={opt.v}
-                                            onClick={() => !savingKey && feat.actionKey && handleSettingsText(feat.actionKey, opt.v)}
-                                            style={{
-                                              flex: 1, padding: "0.35rem 0.5rem", borderRadius: "0.5rem",
-                                              fontWeight: 700, fontSize: "0.7rem", cursor: savingKey ? "not-allowed" : "pointer",
-                                              background: actionVal === opt.v
-                                                ? (opt.v === "delete_kick" ? "rgba(239,68,68,0.15)" : "rgba(0,212,255,0.12)")
-                                                : "rgba(255,255,255,0.03)",
-                                              color: actionVal === opt.v
-                                                ? (opt.v === "delete_kick" ? "#fca5a5" : C.accent)
-                                                : C.muted,
-                                              border: `1px solid ${actionVal === opt.v
-                                                ? (opt.v === "delete_kick" ? "rgba(239,68,68,0.35)" : "rgba(0,212,255,0.3)")
-                                                : "rgba(255,255,255,0.06)"}`,
-                                              transition: "all 0.15s"
-                                            }}
-                                          >{opt.label}</button>
-                                        ))}
+                                  {/* Action / mode selector */}
+                                  {feat.actionKey && (() => {
+                                    const opts = feat.actionOptions ?? [
+                                      { v: "delete", label: "🗑 Delete only" },
+                                      { v: "delete_kick", label: "🚫 Delete + Kick" },
+                                    ];
+                                    const isMode = !!feat.actionOptions;
+                                    const rowLabel = isMode ? "Mode:" : "Action when triggered:";
+                                    return (
+                                      <div style={{ marginTop: "0.65rem" }}>
+                                        <div style={{ color: C.muted, fontSize: "0.67rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.35rem" }}>{rowLabel}</div>
+                                        <div style={{ display: "flex", gap: "0.4rem" }}>
+                                          {opts.map(opt => {
+                                            const isSelected = actionVal === opt.v;
+                                            const isDanger = opt.v === "delete_kick";
+                                            return (
+                                              <button
+                                                key={opt.v}
+                                                onClick={() => !savingKey && feat.actionKey && handleSettingsText(feat.actionKey, opt.v)}
+                                                style={{
+                                                  flex: 1, padding: "0.35rem 0.5rem", borderRadius: "0.5rem",
+                                                  fontWeight: 700, fontSize: "0.7rem", cursor: savingKey ? "not-allowed" : "pointer",
+                                                  background: isSelected
+                                                    ? (isDanger ? "rgba(239,68,68,0.15)" : "rgba(0,212,255,0.12)")
+                                                    : "rgba(255,255,255,0.03)",
+                                                  color: isSelected
+                                                    ? (isDanger ? "#fca5a5" : C.accent)
+                                                    : C.muted,
+                                                  border: `1px solid ${isSelected
+                                                    ? (isDanger ? "rgba(239,68,68,0.35)" : "rgba(0,212,255,0.3)")
+                                                    : "rgba(255,255,255,0.06)"}`,
+                                                  transition: "all 0.15s"
+                                                }}
+                                              >{opt.label}</button>
+                                            );
+                                          })}
+                                        </div>
                                       </div>
-                                    </div>
-                                  )}
+                                    );
+                                  })()}
                                   {/* Bad words input — only for antibadword card */}
                                   {feat.key === "antibadword" && (
                                     <div style={{ marginTop: "0.75rem" }}>

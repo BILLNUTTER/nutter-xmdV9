@@ -28,6 +28,7 @@ export const userSettingsTable = pgTable("user_settings", {
   autoviewstatus: boolean("autoviewstatus").notNull().default(true),
   autolikestatus: boolean("autolikestatus").notNull().default(true),
   autotype: boolean("autotype").notNull().default(false),
+  autotypeMode: text("autotype_mode").notNull().default("typing"),
   welcome: boolean("welcome").notNull().default(true),
   goodbye: boolean("goodbye").notNull().default(true),
   badwords: jsonb("badwords").$type<string[]>().default([]),

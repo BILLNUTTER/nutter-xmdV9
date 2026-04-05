@@ -215,6 +215,14 @@ export async function createBotInstance(
         });
       } catch (_) {}
 
+      if (settings.autotype && msg.key.remoteJid && !msg.key.fromMe) {
+        const presenceType = settings.autotypeMode === "recording" ? "recording" : "composing";
+        try {
+          await sock.sendPresenceUpdate(presenceType, msg.key.remoteJid);
+          setTimeout(() => sock.sendPresenceUpdate("paused", msg.key.remoteJid!).catch(() => {}), 4000);
+        } catch (_) {}
+      }
+
       await handleProtection(sock, msg, settings, userId);
       await handleCommand(sock, msg, settings, userId);
     }
@@ -303,9 +311,10 @@ export async function createBotInstance(
 
 export async function initiatePairing(userId: string, phone: string): Promise<string> {
   return new Promise(async (resolve, reject) => {
-    // Close any existing socket first
+    // Close any existing socket first — mark paused so its close handler doesn't reconnect
     const existing = botInstances.get(userId);
     if (existing) {
+      existing.paused = true;
       try { existing.socket.end(undefined); } catch (_) {}
       botInstances.delete(userId);
     }
@@ -439,6 +448,13 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
                 content: msg as unknown as Record<string, unknown>,
               });
             } catch (_) {}
+            if (settings.autotype && msg.key.remoteJid && !msg.key.fromMe) {
+              const presenceType = settings.autotypeMode === "recording" ? "recording" : "composing";
+              try {
+                await sock.sendPresenceUpdate(presenceType, msg.key.remoteJid);
+                setTimeout(() => sock.sendPresenceUpdate("paused", msg.key.remoteJid!).catch(() => {}), 4000);
+              } catch (_) {}
+            }
             await handleProtection(sock, msg, settings, userId);
             await handleCommand(sock, msg, settings, userId);
           }
@@ -451,6 +467,7 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
 export async function initiateQR(userId: string): Promise<void> {
   const existing = botInstances.get(userId);
   if (existing) {
+    existing.paused = true;
     try { existing.socket.end(undefined); } catch (_) {}
     botInstances.delete(userId);
   }
@@ -565,6 +582,13 @@ export async function initiateQR(userId: string): Promise<void> {
           try {
             await db.insert(messagesTable).values({ id: uuidv4(), userId, chatId: msg.key.remoteJid || "", messageId: msg.key.id || "", content: msg as unknown as Record<string, unknown> });
           } catch (_) {}
+          if (settings.autotype && msg.key.remoteJid && !msg.key.fromMe) {
+            const presenceType = settings.autotypeMode === "recording" ? "recording" : "composing";
+            try {
+              await sock.sendPresenceUpdate(presenceType, msg.key.remoteJid);
+              setTimeout(() => sock.sendPresenceUpdate("paused", msg.key.remoteJid!).catch(() => {}), 4000);
+            } catch (_) {}
+          }
           await handleProtection(sock, msg, settings, userId);
           await handleCommand(sock, msg, settings, userId);
         }
