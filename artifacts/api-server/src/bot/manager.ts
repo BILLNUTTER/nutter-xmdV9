@@ -12,7 +12,7 @@ import { join } from "path";
 import { existsSync, mkdirSync } from "fs";
 import { db } from "@workspace/db";
 import { usersTable, userSettingsTable, messagesTable } from "@workspace/db";
-import { eq, lt } from "drizzle-orm";
+import { eq, lt, and } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { handleCommand } from "./commands/index.js";
 import { handleProtection } from "./protection.js";
@@ -199,7 +199,10 @@ export async function createBotInstance(
       const [cached] = await db
         .select()
         .from(messagesTable)
-        .where(eq(messagesTable.messageId, key.id));
+        .where(and(
+          eq(messagesTable.userId, userId),
+          eq(messagesTable.messageId, key.id),
+        ));
 
       if (!cached || new Date(cached.createdAt) < tenMinutesAgo) continue;
 

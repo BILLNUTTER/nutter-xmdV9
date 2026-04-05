@@ -47,10 +47,21 @@ export async function handleOwnerCommand(
       break;
     }
     case "delete": {
-      const key = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
-      if (key) {
-        await sock.sendMessage(chatId, { delete: msg.key }).catch(() => {});
+      const stanzaId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
+      const participant = msg.message?.extendedTextMessage?.contextInfo?.participant;
+      if (!stanzaId) {
+        await sock.sendMessage(chatId, {
+          text: `Usage: ${prefix}delete (reply to a message to delete it)\n\n_NUTTER-XMD ⚡_`,
+        }, { quoted: msg }).catch(() => {});
+        break;
       }
+      const targetKey: proto.IMessageKey = {
+        remoteJid: chatId,
+        id: stanzaId,
+        fromMe: !participant,
+        participant: participant || undefined,
+      };
+      await sock.sendMessage(chatId, { delete: targetKey }).catch(() => {});
       break;
     }
     case "warn": {

@@ -135,12 +135,28 @@ _Example:_ \`${prefix}anticall on\`
     return;
   }
 
-  if (command === "anticall" && args[1]) {
-    const text = args.slice(1).join(" ").trim();
-    await updateSetting({ anticallMsg: text });
-    const val = args[0]?.toLowerCase() === "on";
-    await updateSetting({ anticall: val, anticallMsg: text || settings.anticallMsg || undefined });
-    await sock.sendMessage(chatId, { text: `✅ Anti-call ${val ? "ON ✅" : "OFF ❌"} and message set!\n\n_NUTTER-XMD ⚡_` }, { quoted: msg }).catch(() => {});
+  if (command === "anticall") {
+    const first = args[0]?.toLowerCase();
+    if (first === "on" || first === "off") {
+      const val = first === "on";
+      const customMsg = args.slice(1).join(" ").trim();
+      const update: Partial<typeof userSettingsTable.$inferInsert> = { anticall: val };
+      if (customMsg) update.anticallMsg = customMsg;
+      await updateSetting(update);
+      await sock.sendMessage(chatId, {
+        text: `✅ Anti-call turned ${val ? "ON ✅" : "OFF ❌"}${customMsg ? `\nMessage: "${customMsg}"` : ""}\n\n_NUTTER-XMD ⚡_`,
+      }, { quoted: msg }).catch(() => {});
+    } else if (args.length > 0) {
+      const customMsg = args.join(" ").trim();
+      await updateSetting({ anticallMsg: customMsg });
+      await sock.sendMessage(chatId, {
+        text: `✅ Anti-call message set to:\n"${customMsg}"\n\n_NUTTER-XMD ⚡_`,
+      }, { quoted: msg }).catch(() => {});
+    } else {
+      await sock.sendMessage(chatId, {
+        text: `⚙️ *Anti-Call*\nStatus: ${settings.anticall ? "ON ✅" : "OFF ❌"}\nMessage: ${settings.anticallMsg || "(default)"}\n\nUsage:\n${prefix}anticall on/off\n${prefix}anticall on <custom message>\n${prefix}anticall <custom message>\n\n_NUTTER-XMD ⚡_`,
+      }, { quoted: msg }).catch(() => {});
+    }
     return;
   }
 
