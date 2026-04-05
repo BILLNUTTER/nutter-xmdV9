@@ -30,13 +30,16 @@ export async function pairBot(phone: string): Promise<{
   return res.json();
 }
 
-export async function getBotStatus(userId: string): Promise<{
+export async function getBotStatus(userId: string, token?: string | null): Promise<{
   connected: boolean;
   status: string;
-  phone: string;
   lastSeen: string | null;
 }> {
-  const res = await fetch(`${BASE}/bot/status/${userId}`);
+  const headers: Record<string, string> = {};
+  const t = token ?? getUserToken();
+  if (t) headers["x-user-token"] = t;
+  const res = await fetch(`${BASE}/bot/status/${userId}`, { headers });
+  if (!res.ok) return { connected: false, status: "unknown", lastSeen: null };
   return res.json();
 }
 

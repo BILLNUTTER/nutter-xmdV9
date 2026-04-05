@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "@workspace/db";
 import { usersTable, userSettingsTable } from "@workspace/db";
@@ -63,8 +63,24 @@ router.post("/bot/pair", async (req, res) => {
   }
 });
 
-router.get("/bot/status/:userId", async (req, res) => {
-  const { userId } = req.params;
+router.get("/bot/status/:userId", async (req: Request<{ userId: string }>, res) => {
+  const userId = req.params.userId;
+  const rawToken = req.headers["x-user-token"] as string | undefined;
+  if (!rawToken) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  let tokenUserId: string;
+  try {
+    tokenUserId = Buffer.from(rawToken, "base64").toString("utf8").split(":")[0];
+  } catch {
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+  if (tokenUserId !== userId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
   if (!user) {
     res.status(404).json({ error: "User not found" });
@@ -72,25 +88,6 @@ router.get("/bot/status/:userId", async (req, res) => {
   }
   const instance = botInstances.get(userId);
   res.json({
-    userId: user.id,
-    phone: user.phone,
-    connected: !!instance,
-    status: user.status,
-    lastSeen: user.lastSeen,
-  });
-});
-
-router.get("/bot/status-by-phone/:phone", async (req, res) => {
-  const cleanPhone = req.params.phone.replace(/[^0-9]/g, "");
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.phone, cleanPhone));
-  if (!user) {
-    res.json({ connected: false, status: "not_registered" });
-    return;
-  }
-  const instance = botInstances.get(user.id);
-  res.json({
-    userId: user.id,
-    phone: user.phone,
     connected: !!instance,
     status: user.status,
     lastSeen: user.lastSeen,

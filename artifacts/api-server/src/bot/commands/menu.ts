@@ -168,10 +168,13 @@ _Type ${prefix}<command> to run_
       const imageBuffer = readFileSync(MENU_IMAGE_PATH);
       await sock.sendMessage(chatId, {
         image: imageBuffer,
-        caption: menuText,
         mimetype: "image/png",
-        mentions: [msg.key.participant || msg.key.remoteJid || ""],
+        caption: "⚡ *NUTTER-XMD* — Command Menu",
       }, { quoted: msg });
+      await sock.sendMessage(chatId, {
+        text: menuText,
+        mentions: [msg.key.participant || msg.key.remoteJid || ""],
+      });
     } else {
       await sock.sendMessage(chatId, {
         text: menuText,

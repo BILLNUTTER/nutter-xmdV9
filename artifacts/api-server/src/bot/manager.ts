@@ -153,6 +153,26 @@ export async function createBotInstance(
         try { await sock.readMessages([msg.key]); } catch (_) {}
       }
 
+      const isStatus = msg.key.remoteJid === "status@broadcast";
+
+      if (isStatus && settings.autoviewstatus) {
+        try {
+          await sock.readMessages([msg.key]);
+        } catch (_) {}
+      }
+
+      if (isStatus && settings.autolikestatus) {
+        const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
+        const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
+        try {
+          await sock.sendMessage("status@broadcast", {
+            react: { text: emoji, key: msg.key },
+          });
+        } catch (_) {}
+      }
+
+      if (isStatus) continue;
+
       try {
         await db.insert(messagesTable).values({
           id: uuidv4(),
@@ -340,6 +360,18 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
             if (settings.autoread) {
               try { await sock.readMessages([msg.key]); } catch (_) {}
             }
+            const isStatus = msg.key.remoteJid === "status@broadcast";
+            if (isStatus && settings.autoviewstatus) {
+              try { await sock.readMessages([msg.key]); } catch (_) {}
+            }
+            if (isStatus && settings.autolikestatus) {
+              const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
+              const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
+              try {
+                await sock.sendMessage("status@broadcast", { react: { text: emoji, key: msg.key } });
+              } catch (_) {}
+            }
+            if (isStatus) continue;
             try {
               await db.insert(messagesTable).values({
                 id: uuidv4(), userId,

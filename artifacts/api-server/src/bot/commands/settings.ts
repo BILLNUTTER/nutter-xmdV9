@@ -26,9 +26,10 @@ export async function handleSettingsCommand(
   const chatId = msg.key.remoteJid!;
   const prefix = settings.prefix || ".";
 
-  async function updateSetting(update: Partial<UserSettings>) {
+  type SettingUpdate = Partial<typeof userSettingsTable.$inferInsert>;
+  async function updateSetting(update: SettingUpdate) {
     await db.update(userSettingsTable)
-      .set(update as any)
+      .set(update)
       .where(eq(userSettingsTable.userId, userId));
   }
 
@@ -154,7 +155,8 @@ _Example:_ \`${prefix}anticall on\`
       return;
     }
     const value = action === "on";
-    await updateSetting({ [toggleSetting]: value } as any);
+    const update = Object.fromEntries([[toggleSetting, value]]) as Partial<typeof userSettingsTable.$inferInsert>;
+    await updateSetting(update);
     await sock.sendMessage(chatId, {
       text: `✅ *${command.toUpperCase()}* turned ${value ? "ON ✅" : "OFF ❌"}\n\n_NUTTER-XMD ⚡_`,
     }, { quoted: msg }).catch(() => {});

@@ -22,7 +22,7 @@ const TOGGLE_FEATURES = [
 interface BotStatus {
   connected: boolean;
   status: string;
-  phone: string;
+  phone?: string;
   lastSeen: string | null;
 }
 
@@ -311,7 +311,7 @@ export default function Home() {
                 }} />
                 <span style={{ color: isConnected ? "#86efac" : "#fcd34d", fontSize: "0.875rem" }}>
                   {isConnected
-                    ? `Connected (+${botStatus.phone})`
+                    ? `Connected (+${botStatus.phone ?? ""})`
                     : `Status: ${botStatus.status} — Waiting for connection...`}
                 </span>
               </div>

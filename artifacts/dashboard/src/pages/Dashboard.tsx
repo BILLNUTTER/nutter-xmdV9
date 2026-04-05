@@ -29,7 +29,7 @@ type DashTab = "link" | "settings";
 interface BotStatus {
   connected: boolean;
   status: string;
-  phone: string;
+  phone?: string;
   lastSeen: string | null;
 }
 
@@ -189,7 +189,7 @@ export default function Dashboard() {
                 display: "inline-block"
               }} />
               <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>
-                {isConnected ? `+${botStatus.phone}` : botStatus.status}
+                {isConnected ? `+${botStatus.phone ?? ""}` : botStatus.status}
               </span>
             </div>
           )}
