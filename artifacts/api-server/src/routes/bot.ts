@@ -243,6 +243,8 @@ router.patch("/bots/:botId/settings", requireAuth, async (req: AuthRequest, res)
     "anticall", "antilink", "antisticker", "antitag", "antibadword", "antispam",
     "antidelete", "chatbot", "autoread", "alwaysonline", "autoviewstatus",
     "autolikestatus", "autotype", "welcome", "goodbye",
+    "antilinkAction", "antistickerAction", "antitagAction", "antibadwordAction", "antispamAction",
+    "badwords",
   ];
 
   const filtered: Record<string, unknown> = {};

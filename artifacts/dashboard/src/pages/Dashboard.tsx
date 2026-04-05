@@ -48,6 +48,7 @@ export default function Dashboard() {
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [settingsMsg, setSettingsMsg] = useState("");
+  const [badwordsInput, setBadwordsInput] = useState<string>("");
   const [renaming, setRenaming] = useState<Record<string, boolean>>({});
   const [renameName, setRenameName] = useState<Record<string, string>>({});
   const [deleteConfirm, setDeleteConfirm] = useState<Record<string, boolean>>({});
@@ -105,7 +106,26 @@ export default function Dashboard() {
   }
 
   function loadSettings(botId: string) {
-    getBotSettings(botId).then(s => setSettings(s)).catch(() => {});
+    getBotSettings(botId).then(s => {
+      setSettings(s);
+      const words = s.badwords as string[] | null;
+      setBadwordsInput(Array.isArray(words) ? words.join(", ") : "");
+    }).catch(() => {});
+  }
+
+  async function handleSaveBadwords() {
+    if (!selectedBotId) return;
+    const words = badwordsInput
+      .split(/[,\n]+/)
+      .map(w => w.trim().toLowerCase())
+      .filter(Boolean);
+    setSavingKey("badwords");
+    try {
+      const updated = await updateBotSettings(selectedBotId, { badwords: words });
+      setSettings(updated);
+      setSettingsMsg("Bad words list saved!");
+      setTimeout(() => setSettingsMsg(""), 2500);
+    } catch (_) {} finally { setSavingKey(null); }
   }
 
   function stopQRPoll(botId: string) {
@@ -520,6 +540,35 @@ export default function Dashboard() {
                                           >{opt.label}</button>
                                         ))}
                                       </div>
+                                    </div>
+                                  )}
+                                  {/* Bad words input — only for antibadword card */}
+                                  {feat.key === "antibadword" && (
+                                    <div style={{ marginTop: "0.75rem" }}>
+                                      <div style={{ color: C.muted, fontSize: "0.67rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.35rem" }}>Banned words (comma-separated):</div>
+                                      <textarea
+                                        value={badwordsInput}
+                                        onChange={e => setBadwordsInput(e.target.value)}
+                                        placeholder="e.g. badword1, badword2, slur"
+                                        rows={2}
+                                        style={{
+                                          width: "100%", boxSizing: "border-box", resize: "vertical",
+                                          background: "rgba(255,255,255,0.04)", border: `1px solid ${C.border}`,
+                                          borderRadius: "0.5rem", color: C.text, fontSize: "0.78rem",
+                                          padding: "0.4rem 0.6rem", fontFamily: "inherit", outline: "none",
+                                        }}
+                                      />
+                                      <button
+                                        onClick={handleSaveBadwords}
+                                        disabled={!!savingKey}
+                                        style={{
+                                          marginTop: "0.35rem", width: "100%", padding: "0.35rem",
+                                          borderRadius: "0.5rem", border: "none", fontWeight: 700, fontSize: "0.75rem",
+                                          cursor: savingKey ? "not-allowed" : "pointer",
+                                          background: savingKey === "badwords" ? "rgba(0,212,255,0.08)" : "rgba(0,212,255,0.15)",
+                                          color: C.accent, transition: "all 0.15s"
+                                        }}
+                                      >{savingKey === "badwords" ? "Saving…" : "💾 Save Word List"}</button>
                                     </div>
                                   )}
                                 </div>
