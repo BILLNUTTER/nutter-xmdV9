@@ -45,7 +45,7 @@ router.post("/bot/pair", async (req, res) => {
   }
 
   const existing = botInstances.get(user.id);
-  if (existing) {
+  if (existing?.connected) {
     const userToken = Buffer.from(`${user.id}:${user.sessionId}`).toString("base64");
     res.json({ pairingCode: null, userId: user.id, userToken, message: "Bot already connected" });
     return;
@@ -96,7 +96,7 @@ router.get("/bot/status/:userId", async (req: Request<{ userId: string }>, res) 
   }
   const instance = botInstances.get(userId);
   res.json({
-    connected: !!instance,
+    connected: instance?.connected === true,
     status: user.status,
     phone: user.phone,
     lastSeen: user.lastSeen,

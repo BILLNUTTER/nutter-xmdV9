@@ -26,6 +26,7 @@ export interface BotInstance {
   userId: string;
   phone: string;
   paused: boolean;
+  connected: boolean;
 }
 
 export const botInstances = new Map<string, BotInstance>();
@@ -56,9 +57,14 @@ export async function createBotInstance(
   silentStart = false
 ): Promise<void> {
   const existing = botInstances.get(userId);
-  if (existing && !existing.paused) {
-    logger.info({ userId }, "Bot instance already active, skipping");
+  if (existing && existing.connected && !existing.paused) {
+    logger.info({ userId }, "Bot instance already active and connected, skipping");
     return;
+  }
+  if (existing && !existing.connected) {
+    logger.info({ userId }, "Closing pending socket before creating new instance");
+    try { existing.socket.end(undefined); } catch (_) {}
+    botInstances.delete(userId);
   }
 
   const authDir = getAuthDir(userId);
@@ -78,7 +84,7 @@ export async function createBotInstance(
     syncFullHistory: false,
   });
 
-  const instance: BotInstance = { socket: sock, userId, phone, paused: false };
+  const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
   botInstances.set(userId, instance);
 
   sock.ev.on("creds.update", saveCreds);
@@ -91,6 +97,13 @@ export async function createBotInstance(
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
       const currentInstance = botInstances.get(userId);
       const isPaused = currentInstance?.paused ?? false;
+
+      const currentConnected = currentInstance?.connected ?? false;
+      if (currentConnected) {
+        await db.update(usersTable)
+          .set({ lastSeen: new Date() })
+          .where(eq(usersTable.id, userId));
+      }
 
       if (isLoggedOut || isPaused) {
         logger.info({ userId, isLoggedOut, isPaused }, "Bot not reconnecting");
@@ -109,6 +122,8 @@ export async function createBotInstance(
 
     if (connection === "open") {
       logger.info({ userId }, "Bot connected!");
+      const inst = botInstances.get(userId);
+      if (inst) inst.connected = true;
 
       await db.update(usersTable)
         .set({ status: "active", lastSeen: new Date(), isFirstConnection: "false" })
@@ -287,7 +302,7 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       syncFullHistory: false,
     });
 
-    const instance: BotInstance = { socket: sock, userId, phone, paused: false };
+    const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
     botInstances.set(userId, instance);
     sock.ev.on("creds.update", saveCreds);
 
