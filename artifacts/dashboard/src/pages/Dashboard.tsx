@@ -473,7 +473,32 @@ export default function Dashboard() {
                   <div style={{ textAlign: "center", padding: "3rem", color: C.muted }}>Loading settings...</div>
                 ) : (
                   <>
-                    {(["Protection", "Automation", "Groups"] as const).map(group => {
+                    {(["Automation", "Advanced", "Groups", "Protection"] as string[]).map(group => {
+                      if (group === "Advanced") {
+                        return (
+                          <div key="advanced" style={{ marginBottom: "1.5rem", background: C.card, border: `1px solid ${C.border}`, borderRadius: "1rem", padding: "1.75rem" }}>
+                            <h3 style={{ color: C.accent, fontWeight: 800, fontSize: "1rem", marginBottom: "1.25rem" }}>⚙️ Advanced Settings</h3>
+                            <div style={{ display: "grid", gap: "1rem" }}>
+                              {[
+                                { key: "prefix", label: "🔑 Command Prefix", placeholder: ".", hint: "Character to trigger commands (default: .)", multi: false, max: 3 },
+                                { key: "mode", label: "🌐 Bot Mode", placeholder: "private", hint: "private = owner only; public = anyone", multi: false },
+                                { key: "anticallMsg", label: "📵 Anti-Call Message", placeholder: "Calls not allowed...", multi: true },
+                                { key: "welcomeMsg", label: "👋 Welcome Message", placeholder: "Welcome {user} to {group}!", multi: true, hint: "Use {user} and {group}" },
+                                { key: "goodbyeMsg", label: "💫 Goodbye Message", placeholder: "Goodbye {user}!", multi: true, hint: "Use {user} and {group}" },
+                                { key: "likeEmojis", label: "❤️ Status React Emojis", placeholder: "🔥 💯 ✨ 🎉 👍", hint: "Space-separated emojis" },
+                              ].map(f => (
+                                <SettingField
+                                  key={f.key} label={f.label} placeholder={f.placeholder}
+                                  value={String(settings[f.key] ?? f.placeholder ?? "")}
+                                  onSave={v => handleSettingsText(f.key, v)}
+                                  saving={savingKey === f.key}
+                                  multiline={f.multi} hint={f.hint} maxLength={f.max}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
                       const features = TOGGLE_FEATURES.filter(f => f.group === group);
                       return (
                         <div key={group} style={{ marginBottom: "1.5rem" }}>
@@ -579,27 +604,6 @@ export default function Dashboard() {
                       );
                     })}
 
-                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: "1rem", padding: "1.75rem" }}>
-                      <h3 style={{ color: C.accent, fontWeight: 800, fontSize: "1rem", marginBottom: "1.25rem" }}>⚙️ Advanced Settings</h3>
-                      <div style={{ display: "grid", gap: "1rem" }}>
-                        {[
-                          { key: "prefix", label: "🔑 Command Prefix", placeholder: ".", hint: "Character to trigger commands (default: .)", multi: false, max: 3 },
-                          { key: "mode", label: "🌐 Bot Mode", placeholder: "private", hint: "private = owner only; public = anyone", multi: false },
-                          { key: "anticallMsg", label: "📵 Anti-Call Message", placeholder: "Calls not allowed...", multi: true },
-                          { key: "welcomeMsg", label: "👋 Welcome Message", placeholder: "Welcome {user} to {group}!", multi: true, hint: "Use {user} and {group}" },
-                          { key: "goodbyeMsg", label: "💫 Goodbye Message", placeholder: "Goodbye {user}!", multi: true, hint: "Use {user} and {group}" },
-                          { key: "likeEmojis", label: "❤️ Status React Emojis", placeholder: "🔥 💯 ✨ 🎉 👍", hint: "Space-separated emojis" },
-                        ].map(f => (
-                          <SettingField
-                            key={f.key} label={f.label} placeholder={f.placeholder}
-                            value={String(settings[f.key] ?? f.placeholder ?? "")}
-                            onSave={v => handleSettingsText(f.key, v)}
-                            saving={savingKey === f.key}
-                            multiline={f.multi} hint={f.hint} maxLength={f.max}
-                          />
-                        ))}
-                      </div>
-                    </div>
                   </>
                 )}
               </>
