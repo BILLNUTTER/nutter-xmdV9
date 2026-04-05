@@ -111,7 +111,7 @@ export async function startQR(botId: string): Promise<void> {
 }
 
 export async function getQR(botId: string): Promise<{ qr: string | null; available: boolean }> {
-  const res = await apiFetch(`/bots/${botId}/qr`);
+  const res = await apiFetch(`/bots/${botId}/qr`, { cache: "no-store" });
   return res.json();
 }
 

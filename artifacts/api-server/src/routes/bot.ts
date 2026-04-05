@@ -184,7 +184,9 @@ router.get("/bots/:botId/qr", requireAuth, async (req: AuthRequest, res) => {
   }
 
   const qr = pendingQRCodes.get(botId) ?? null;
-  res.json({ qr, available: !!qr });
+  // Disable caching so the browser never serves a stale 304 response
+  // while the frontend is polling for a fresh QR code image.
+  res.set("Cache-Control", "no-store").json({ qr, available: !!qr });
 });
 
 router.get("/bots/:botId/status", requireAuth, async (req: AuthRequest, res) => {

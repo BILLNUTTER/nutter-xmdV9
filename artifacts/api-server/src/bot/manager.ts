@@ -300,7 +300,20 @@ export async function createBotInstance(
 
 export async function initiatePairing(userId: string, phone: string): Promise<string> {
   return new Promise(async (resolve, reject) => {
+    // Close any existing socket first
+    const existing = botInstances.get(userId);
+    if (existing) {
+      try { existing.socket.end(undefined); } catch (_) {}
+      botInstances.delete(userId);
+    }
+    pendingQRCodes.delete(userId);
+
+    // Wipe old auth so Baileys can request a fresh pairing code
+    // (requestPairingCode only works when there are no existing credentials)
     const authDir = getAuthDir(userId);
+    try { rmSync(authDir, { recursive: true, force: true }); } catch (_) {}
+    mkdirSync(authDir, { recursive: true });
+
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
@@ -436,7 +449,12 @@ export async function initiateQR(userId: string): Promise<void> {
   }
   pendingQRCodes.delete(userId);
 
+  // Always wipe old auth so Baileys generates a fresh QR instead of
+  // trying to reconnect with stale/expired credentials.
   const authDir = getAuthDir(userId);
+  try { rmSync(authDir, { recursive: true, force: true }); } catch (_) {}
+  mkdirSync(authDir, { recursive: true });
+
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const { version } = await fetchLatestBaileysVersion();
 
