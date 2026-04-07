@@ -20,7 +20,10 @@ export async function handleCommand(
 ): Promise<void> {
   const chatId = msg.key.remoteJid;
   if (!chatId) return;
-  if (msg.key.fromMe) return;
+
+  // Don't filter fromMe — the bot is the user's own WhatsApp account so all
+  // their commands have fromMe=true. Baileys only emits type="notify" for
+  // genuinely incoming messages, so the bot's own replies won't loop back.
 
   const sender = msg.key.participant || msg.key.remoteJid || "";
 
@@ -33,7 +36,8 @@ export async function handleCommand(
   const isGroup = chatId.endsWith("@g.us");
 
   if (!messageText.startsWith(prefix)) {
-    if (settings.chatbot && !isGroup) {
+    // Never auto-reply to the bot's own outgoing messages
+    if (settings.chatbot && !isGroup && !msg.key.fromMe) {
       await sock.sendMessage(chatId, {
         text: `🤖 Auto-reply is on. Type *${prefix}menu* to see available commands.\n\n_Powered by *NUTTER-XMD* ⚡_`,
       }).catch(() => {});

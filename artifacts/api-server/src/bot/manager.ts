@@ -396,6 +396,11 @@ export async function createBotInstance(
 
         reconnectAttempts.delete(userId);
 
+        // Always check DB for isFirstConnection so we send the startup
+        // message regardless of how createBotInstance was invoked.
+        const [dbUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+        const shouldSendWelcome = dbUser?.isFirstConnection !== "false" && !silentStart;
+
         await db
           .update(usersTable)
           .set({
@@ -406,12 +411,13 @@ export async function createBotInstance(
           })
           .where(eq(usersTable.id, userId));
 
-        if (isFirstConnection && !silentStart && resolvedPhone) {
+        if (shouldSendWelcome && resolvedPhone) {
           try {
             const jid = `${resolvedPhone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
             await sock.sendMessage(jid, {
               text: `✅ *NUTTER-XMD V.9.1.3* connected successfully!\n\nType *.menu* to get started ⚡\n\n_Powered by *NUTTER-XMD* ⚡_`,
             });
+            logger.info({ userId }, "Startup message sent");
           } catch (_) {}
         }
 
