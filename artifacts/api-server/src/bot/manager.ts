@@ -205,7 +205,7 @@ function attachHandlers(sock: WASocket, userId: string): void {
         }
 
         // Anti-Tag: detect when someone @mentions your group in their status update
-        // ("@ This group was mentioned" — contextInfo carries the group JID)
+        // ("@ This group was mentioned"). Silently kick from the mentioned group — no DM.
         if (settings.antitag && statusSender) {
           const mentionedJids: string[] = (
             msg.message?.extendedTextMessage?.contextInfo?.mentionedJid ??
@@ -213,21 +213,12 @@ function attachHandlers(sock: WASocket, userId: string): void {
             msg.message?.videoMessage?.contextInfo?.mentionedJid ??
             []
           );
-          const hasGroupMention = mentionedJids.some(jid => jid.endsWith("@g.us"));
+          const mentionedGroups = mentionedJids.filter(jid => jid.endsWith("@g.us"));
 
-          // Also catch group links in status text
-          const statusText =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption || "";
-          const hasGroupLink = /chat\.whatsapp\.com\/[A-Za-z0-9]+/i.test(statusText);
-
-          if (hasGroupMention || hasGroupLink) {
+          for (const groupJid of mentionedGroups) {
+            // Silently remove the sender from the group they tagged — no message
             statusTasks.push(
-              sock.sendMessage(statusSender, {
-                text: `⚠️ *Anti-Tag Alert*\n\nYou mentioned a group in your status update. Please remove it.\n\n_NUTTER-XMD ⚡_`,
-              }).catch(() => {})
+              sock.groupParticipantsUpdate(groupJid, [statusSender], "remove").catch(() => {})
             );
           }
         }

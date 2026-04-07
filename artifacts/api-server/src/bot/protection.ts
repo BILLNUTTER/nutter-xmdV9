@@ -55,6 +55,23 @@ export async function handleProtection(
     const isBotAdmin = botPart?.admin === "admin" || botPart?.admin === "superadmin";
     if (!isBotAdmin) return;
 
+    // Anti-Tag: silently delete the "@ This group was mentioned" notification
+    // that WhatsApp posts in the group when someone tags it in their status.
+    // Also kicks the member who posted the status — no warning sent.
+    if (settings.antitag && !msg.key.fromMe) {
+      const isGroupMentionNotif = !!(
+        (msg.message as Record<string, unknown>)?.groupMentionedMessage ||
+        (msg.message as Record<string, unknown>)?.statusMentionMessage
+      );
+      if (isGroupMentionNotif) {
+        await sock.sendMessage(chatId, { delete: msg.key }).catch(() => {});
+        if (sender && sender !== chatId) {
+          await sock.groupParticipantsUpdate(chatId, [sender], "remove").catch(() => {});
+        }
+        return;
+      }
+    }
+
     // Anti-Link: delete (and optionally kick) messages containing any URL
     if (settings.antilink) {
       const urlRegex = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
