@@ -2,6 +2,7 @@ import { WASocket, proto, downloadContentFromMessage } from "@whiskeysockets/bai
 import { UserSettings } from "@workspace/db";
 import { randomBytes } from "crypto";
 import { botInstances } from "../manager.js";
+import { getViewOnce } from "../msg-store.js";
 
 async function streamToBuffer(stream: AsyncIterable<Buffer>): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -183,50 +184,59 @@ export async function handleToolsCommand(
     }
     case "vv":
     case "vv2": {
-      // Look for context info in all possible message wrapper types
+      // Get context info from any reply type
       const ctx =
         msg.message?.extendedTextMessage?.contextInfo ??
         msg.message?.imageMessage?.contextInfo ??
         msg.message?.videoMessage?.contextInfo ??
         msg.message?.documentMessage?.contextInfo ??
-        msg.message?.audioMessage?.contextInfo ??
-        (msg.message as Record<string, { contextInfo?: proto.IContextInfo } | undefined> | undefined)?.['buttonsResponseMessage']?.contextInfo;
+        msg.message?.audioMessage?.contextInfo;
 
+      const stanzaId = ctx?.stanzaId; // the quoted message's ID
       const quotedMsg = ctx?.quotedMessage;
-      if (!quotedMsg) {
+
+      if (!quotedMsg || !stanzaId) {
         await sock.sendMessage(chatId, {
-          text: `👁️ *View Once Viewer*\n\nReply to a view-once message with *${prefix}vv* to reveal it.\n\n_NUTTER-XMD ⚡_`,
+          text: `👁️ *View Once Viewer*\n\n• *.vv* — reply to reveal in this chat\n• *.vv2* — reply to reveal privately in your DM\n\nOnly works within *5 minutes* of receiving the view-once.\n\n_NUTTER-XMD ⚡_`,
         }, { quoted: msg }).catch(() => {});
         break;
       }
 
-      // Unwrap viewOnce container — try every known wrapper.
-      // Also handle the case where the viewOnce wrapper was already stripped
-      // (happens when the message was already opened on the device before reply).
-      const vom: proto.IMessage =
-        quotedMsg.viewOnceMessage?.message ??
-        quotedMsg.viewOnceMessageV2?.message ??
-        quotedMsg.viewOnceMessageV2Extension?.message ??
-        quotedMsg; // fallback: treat the quoted msg itself as the content
+      // Check if we have the view-once stored and it's within 5 minutes
+      const stored = getViewOnce(userId, stanzaId);
+      if (!stored) {
+        await sock.sendMessage(chatId, {
+          text: `⏳ *View-once expired or not found.*\n\nView-once messages can only be revealed within *5 minutes* of receiving them.\n\n_NUTTER-XMD ⚡_`,
+        }, { quoted: msg }).catch(() => {});
+        break;
+      }
 
-      // Determine media type
+      // Unwrap viewOnce from the stored original message
+      const storedMsgContent = stored.msg.message;
+      const vom: proto.IMessage =
+        storedMsgContent?.viewOnceMessage?.message ??
+        storedMsgContent?.viewOnceMessageV2?.message ??
+        storedMsgContent?.viewOnceMessageV2Extension?.message ??
+        quotedMsg; // fallback: use what's in the reply context
+
       const imgMsg = vom.imageMessage ?? null;
       const vidMsg = vom.videoMessage ?? null;
       const audMsg = vom.audioMessage ?? null;
 
       if (!imgMsg && !vidMsg && !audMsg) {
         await sock.sendMessage(chatId, {
-          text: `❌ No media found in that message. Make sure you are replying to a view-once photo, video, or voice note.\n\n_NUTTER-XMD ⚡_`,
+          text: `❌ No media found. Reply to a view-once photo, video, or voice note.\n\n_NUTTER-XMD ⚡_`,
         }, { quoted: msg }).catch(() => {});
         break;
       }
 
       const botPhone = (sock.user?.id || "").split(":")[0].split("@")[0];
       const dmJid = `${botPhone}@s.whatsapp.net`;
-      // vv → reveal in the same chat; vv2 → send to DM only
       const targetJid = command === "vv2" ? dmJid : chatId;
       const senderJid = ctx?.participant ?? ctx?.remoteJid ?? "";
       const senderName = senderJid.split("@")[0] || "someone";
+      const ageMin = Math.floor(stored.age / 60000);
+      const ageLabel = ageMin < 1 ? "just now" : `${ageMin} min ago`;
 
       try {
         if (imgMsg) {
@@ -234,14 +244,14 @@ export async function handleToolsCommand(
           const buffer = await streamToBuffer(stream as unknown as AsyncIterable<Buffer>);
           await sock.sendMessage(targetJid, {
             image: buffer,
-            caption: `👁️ *View Once Revealed*\n\nFrom: @${senderName}\n\n_NUTTER-XMD ⚡_`,
+            caption: `👁️ *View Once Revealed*\nFrom: @${senderName} (${ageLabel})\n\n_NUTTER-XMD ⚡_`,
           }, command === "vv" ? { quoted: msg } : undefined);
         } else if (vidMsg) {
           const stream = await downloadContentFromMessage(vidMsg, "video");
           const buffer = await streamToBuffer(stream as unknown as AsyncIterable<Buffer>);
           await sock.sendMessage(targetJid, {
             video: buffer,
-            caption: `👁️ *View Once Revealed*\n\nFrom: @${senderName}\n\n_NUTTER-XMD ⚡_`,
+            caption: `👁️ *View Once Revealed*\nFrom: @${senderName} (${ageLabel})\n\n_NUTTER-XMD ⚡_`,
           }, command === "vv" ? { quoted: msg } : undefined);
         } else if (audMsg) {
           const stream = await downloadContentFromMessage(audMsg, "audio");
@@ -259,7 +269,7 @@ export async function handleToolsCommand(
         }
       } catch (e) {
         await sock.sendMessage(chatId, {
-          text: `❌ Failed to reveal: ${(e as Error).message || "Try again"}\n\n_NUTTER-XMD ⚡_`,
+          text: `❌ Failed to reveal: ${(e as Error).message || "Media may have expired on WhatsApp's servers."}\n\n_NUTTER-XMD ⚡_`,
         }, { quoted: msg }).catch(() => {});
       }
       break;

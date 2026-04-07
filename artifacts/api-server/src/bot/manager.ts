@@ -19,6 +19,7 @@ import { handleProtection } from "./protection.js";
 import { handlePresence } from "./presence.js";
 import { getCachedSettings, invalidateSettingsCache } from "./settings-cache.js";
 import { useDatabaseAuthState, hasStoredSession, clearDatabaseSession } from "./db-auth-state.js";
+import { storeForAntidelete, popAntidelete, storeViewOnce } from "./msg-store.js";
 import pino from "pino";
 
 const MAX_RETRIES = 5;
@@ -143,10 +144,14 @@ function attachHandlers(sock: WASocket, userId: string): void {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
-      // For "append" (messages sent from the user's own primary device / secondary
-      // device sync), only process messages that arrived in the last 30 seconds
-      // so historical sync on startup does not trigger commands.
-      if (type === "append") {
+      const isStatusMsg = msg.key.remoteJid === "status@broadcast";
+
+      // For "append" (messages synced from primary/secondary device), skip old
+      // messages to avoid re-triggering commands from history.
+      // EXCEPTION: status@broadcast messages — these always arrive as "append"
+      // with the timestamp of when the status was posted (could be hours ago),
+      // so we must NOT apply the recency filter to them.
+      if (type === "append" && !isStatusMsg) {
         const msgTime = (Number(msg.messageTimestamp) || 0) * 1000;
         if (Date.now() - msgTime > 30_000) continue;
       }
@@ -228,15 +233,18 @@ function attachHandlers(sock: WASocket, userId: string): void {
         continue;
       }
 
-      // Store message for antidelete without blocking command processing
+      // Store for antidelete in memory (no DB write needed)
       if (settings.antidelete) {
-        db.insert(messagesTable).values({
-          id: uuidv4(),
-          userId,
-          chatId: msg.key.remoteJid || "",
-          messageId: msg.key.id || "",
-          content: msg as unknown as Record<string, unknown>,
-        }).catch(() => {});
+        storeForAntidelete(userId, msg);
+      }
+
+      // Store view-once messages in memory so .vv can retrieve them within 5 min
+      const viewOnceContent =
+        msg.message?.viewOnceMessage?.message ||
+        msg.message?.viewOnceMessageV2?.message ||
+        msg.message?.viewOnceMessageV2Extension?.message;
+      if (viewOnceContent) {
+        storeViewOnce(userId, msg);
       }
 
       // Fire presence update without blocking
@@ -263,25 +271,17 @@ function attachHandlers(sock: WASocket, userId: string): void {
     const keys = "keys" in item ? item.keys : [];
     for (const key of keys) {
       if (!key.remoteJid || !key.id) continue;
-      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-      const [cached] = await db
-        .select()
-        .from(messagesTable)
-        .where(and(eq(messagesTable.userId, userId), eq(messagesTable.messageId, key.id)));
-      if (!cached || new Date(cached.createdAt) < tenMinutesAgo) continue;
-      const originalMsg = cached.content as proto.IWebMessageInfo;
+      // Instantly retrieve from memory — no DB query needed
+      const originalMsg = popAntidelete(userId, key.id);
       if (!originalMsg?.message) continue;
       const senderJid = key.participant || key.remoteJid;
-      // Send to bot owner's own DM, not back to the group/chat
       const botPhone = (sock.user?.id || "").split(":")[0].split("@")[0];
       const dmJid = `${botPhone}@s.whatsapp.net`;
-      try {
-        await sock.sendMessage(dmJid, {
-          text: `🔴 *Anti-Delete Alert*\n\n*From:* @${senderJid.split("@")[0]}\n*Chat:* ${key.remoteJid}\n*Message recovered below:*`,
-          mentions: [senderJid],
-        });
-        await sock.sendMessage(dmJid, { forward: originalMsg });
-      } catch (_) {}
+      // Forward immediately without waiting
+      sock.sendMessage(dmJid, {
+        text: `🔴 *Anti-Delete Alert*\n\n*From:* @${senderJid.split("@")[0]}\n*Chat:* ${key.remoteJid}\n*Message recovered:*`,
+        mentions: [senderJid],
+      }).then(() => sock.sendMessage(dmJid, { forward: originalMsg })).catch(() => {});
     }
   });
 
