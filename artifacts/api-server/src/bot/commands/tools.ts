@@ -31,7 +31,7 @@ export async function handleToolsCommand(
     }
     case "alive": {
       await sock.sendMessage(chatId, {
-        text: `✅ *NUTTER-XMD V.9.1.3 is ALIVE!* ⚡\n\n🤖 *Bot:* NUTTER-XMD\n📌 *Version:* V.9.1.3\n⏱️ *Uptime:* ${formatUptime(Date.now() - START_TIME)}\n⚙️ *Prefix:* ${prefix}\n🌐 *Mode:* ${settings.mode}\n\n_Powered by *NUTTER-XMD* ⚡_`,
+        text: `✅ *NUTTER-XMD V.9.1.3 is ALIVE!* ⚡\n\n🇰🇪 *Bot:* NUTTER-XMD\n📌 *Version:* V.9.1.3\n⏱️ *Uptime:* ${formatUptime(Date.now() - START_TIME)}\n⚙️ *Prefix:* ${prefix}\n🌐 *Mode:* ${settings.mode}\n\n_Powered by *NUTTER-XMD* ⚡_`,
       }, { quoted: msg }).catch(() => {});
       break;
     }
@@ -39,7 +39,7 @@ export async function handleToolsCommand(
       const inst = botInstances.get(userId);
       const status = inst ? "✅ Connected" : "❌ Disconnected";
       await sock.sendMessage(chatId, {
-        text: `📊 *BOT STATUS*\n\n${status}\n⏱️ *Uptime:* ${formatUptime(Date.now() - START_TIME)}\n🤖 *Name:* NUTTER-XMD\n📌 *Version:* V.9.1.3\n\n_NUTTER-XMD ⚡_`,
+        text: `📊 *BOT STATUS*\n\n${status}\n⏱️ *Uptime:* ${formatUptime(Date.now() - START_TIME)}\n🇰🇪 *Name:* NUTTER-XMD\n📌 *Version:* V.9.1.3\n\n_NUTTER-XMD ⚡_`,
       }, { quoted: msg }).catch(() => {});
       break;
     }
@@ -127,13 +127,13 @@ export async function handleToolsCommand(
     }
     case "repo": {
       await sock.sendMessage(chatId, {
-        text: `📦 *NUTTER-XMD Repository*\n\n🤖 *Bot:* NUTTER-XMD\n📌 *Version:* V.9.1.3\n👑 *Creator:* NUTTER-XMD Team\n\n_NUTTER-XMD ⚡_`,
+        text: `📦 *NUTTER-XMD Repository*\n\n🇰🇪 *Bot:* NUTTER-XMD\n📌 *Version:* V.9.1.3\n👑 *Creator:* NUTTER-XMD Team\n\n_NUTTER-XMD ⚡_`,
       }, { quoted: msg }).catch(() => {});
       break;
     }
     case "test": {
       await sock.sendMessage(chatId, {
-        text: `✅ *Test Successful!*\n\n🤖 NUTTER-XMD is working perfectly!\n⚡ All systems operational.\n\n_NUTTER-XMD ⚡_`,
+        text: `✅ *Test Successful!*\n\n🇰🇪 NUTTER-XMD is working perfectly!\n⚡ All systems operational.\n\n_NUTTER-XMD ⚡_`,
       }, { quoted: msg }).catch(() => {});
       break;
     }

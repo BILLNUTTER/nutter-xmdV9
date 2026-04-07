@@ -41,7 +41,7 @@ export async function handleCommand(
     // Never auto-reply to the bot's own outgoing messages
     if (settings.chatbot && !isGroup && !msg.key.fromMe) {
       await sock.sendMessage(chatId, {
-        text: `🤖 Auto-reply is on. Type *${prefix}menu* to see available commands.\n\n_Powered by *NUTTER-XMD* ⚡_`,
+        text: `🇰🇪 Auto-reply is on. Type *${prefix}menu* to see available commands.\n\n_Powered by *NUTTER-XMD* ⚡_`,
       }).catch(() => {});
     }
     return;
@@ -63,7 +63,7 @@ export async function handleCommand(
   logger.info({ command, chatId, sender }, "Command received");
 
   // React with a random emoji to every command
-  const REACTIONS = ["🔥","⚡","✅","💫","🎯","💥","🚀","😎","👾","🤖","💎","🌟","✨","🎉","👍","🫡","💪","🏆","⭐","🎊","🥳","🫶","😈","👑","🦁","🐉","🌙","🪄","🏹","🎮"];
+  const REACTIONS = ["🔥","⚡","✅","💫","🎯","💥","🚀","😎","👾","🇰🇪","💎","🌟","✨","🎉","👍","🫡","💪","🏆","⭐","🎊","🥳","🫶","😈","👑","🦁","🐉","🌙","🪄","🏹","🎮"];
   const reactionEmoji = REACTIONS[Math.floor(Math.random() * REACTIONS.length)];
   await sock.sendMessage(chatId, { react: { text: reactionEmoji, key: msg.key } }).catch(() => {});
 
