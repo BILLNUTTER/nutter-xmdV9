@@ -52,6 +52,13 @@ async function normalizeTikTokUrl(url: string): Promise<string> {
   }
 }
 
+function resolveTikwmUrl(raw: string): string {
+  if (!raw) return raw;
+  // tikwm.com sometimes returns a relative path like /video/media/hdplay/xxx.mp4
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  return `https://www.tikwm.com${raw.startsWith("/") ? "" : "/"}${raw}`;
+}
+
 async function downloadTikTok(url: string): Promise<{ buffer: Buffer; title: string; type: "video" }> {
   const normalizedUrl = await normalizeTikTokUrl(url);
   const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(normalizedUrl)}&count=12&cursor=0&web=1&hd=1`;
@@ -59,9 +66,10 @@ async function downloadTikTok(url: string): Promise<{ buffer: Buffer; title: str
   if (data.code !== 0 || !data.data) {
     throw new Error(data.msg || "TikTok download failed — try copying the full link from the TikTok app");
   }
-  // Prefer HD, then no-watermark play, then wmplay
-  const videoUrl = data.data.hdplay || data.data.play || data.data.wmplay;
-  if (!videoUrl) throw new Error("No video URL returned by TikTok API");
+  // Prefer HD, then no-watermark play, then wmplay; resolve relative URLs from tikwm.com
+  const rawUrl = data.data.hdplay || data.data.play || data.data.wmplay;
+  if (!rawUrl) throw new Error("No video URL returned by TikTok API");
+  const videoUrl = resolveTikwmUrl(rawUrl);
   const buffer = await fetchBuffer(videoUrl);
   return { buffer, title: data.data.title || "TikTok Video", type: "video" };
 }
