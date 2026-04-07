@@ -26,6 +26,20 @@ export async function handleSettingsCommand(
   const chatId = msg.key.remoteJid!;
   const prefix = settings.prefix || ".";
 
+  // ── Owner-only guard ────────────────────────────────────────────────────────
+  const ownerJid = sock.user?.id || "";
+  const ownerPhone = ownerJid.split(":")[0].split("@")[0];
+  const senderJid = msg.key.participant || msg.key.remoteJid || "";
+  const senderPhone = senderJid.split("@")[0];
+  const isOwner = msg.key.fromMe === true || senderPhone === ownerPhone;
+  if (!isOwner) {
+    await sock.sendMessage(chatId, {
+      text: `❌ *Owner Only!*\n\nOnly the bot owner can change bot settings.\n\n_NUTTER-XMD ⚡_`,
+    }, { quoted: msg }).catch(() => {});
+    return;
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   type SettingUpdate = Partial<typeof userSettingsTable.$inferInsert>;
   async function updateSetting(update: SettingUpdate) {
     await db.update(userSettingsTable)
