@@ -142,6 +142,11 @@ function attachHandlers(sock: WASocket, userId: string): void {
   const processedMsgIds = new Set<string>();
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    // Broad diagnostic — logs every event type so we can trace what Baileys delivers
+    const statusCount = messages.filter(m => m.key.remoteJid === "status@broadcast").length;
+    if (statusCount > 0) {
+      logger.info({ userId, type, statusCount, total: messages.length }, "messages.upsert with status@broadcast");
+    }
     if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
       const isStatusMsg = msg.key.remoteJid === "status@broadcast";
@@ -177,6 +182,58 @@ function attachHandlers(sock: WASocket, userId: string): void {
         }
       }
 
+      // ── STATUS MESSAGES ─────────────────────────────────────────────────────
+      // MUST be handled BEFORE the `!msg.message` guard below — WhatsApp often
+      // delivers status updates with msg.message === null (encrypted stub), so
+      // we only need msg.key to send read receipts and reactions.
+      if (isStatusMsg) {
+        logger.info({ userId, sender: msg.key.participant, id: msg.key.id, hasMsg: !!msg.message }, "Status message received");
+
+        const settings = await getCachedSettings(userId);
+        if (!settings) continue;
+
+        // Baileys stores the status poster in key.participant OR top-level msg.participant
+        const statusSender = msg.key.participant || msg.participant || "";
+        const statusTasks: Promise<unknown>[] = [];
+
+        if (settings.autoviewstatus && statusSender && msg.key.id) {
+          statusTasks.push(
+            sock.readMessages([msg.key]).catch(() => {}),
+            sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read").catch(() => {})
+          );
+        }
+
+        if (settings.autolikestatus && statusSender && msg.key.id) {
+          const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
+          const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
+          // Build a complete key with participant so the reaction targets the right status
+          const reactKey = { ...msg.key, participant: statusSender };
+          statusTasks.push(
+            sock.sendMessage("status@broadcast", { react: { text: emoji, key: reactKey } }).catch(() => {})
+          );
+        }
+
+        // Anti-Tag: someone @mentions your group in their status → kick silently
+        if (settings.antitag && statusSender && msg.message) {
+          const mentionedJids: string[] = (
+            msg.message?.extendedTextMessage?.contextInfo?.mentionedJid ??
+            msg.message?.imageMessage?.contextInfo?.mentionedJid ??
+            msg.message?.videoMessage?.contextInfo?.mentionedJid ??
+            []
+          );
+          for (const groupJid of mentionedJids.filter(j => j.endsWith("@g.us"))) {
+            statusTasks.push(
+              sock.groupParticipantsUpdate(groupJid, [statusSender], "remove").catch(() => {})
+            );
+          }
+        }
+
+        if (statusTasks.length > 0) Promise.all(statusTasks).catch(() => {});
+        continue;
+      }
+      // ────────────────────────────────────────────────────────────────────────
+
+      // For all non-status messages, require a decoded message body
       if (!msg.message) continue;
 
       const settings = await getCachedSettings(userId);
@@ -188,52 +245,6 @@ function attachHandlers(sock: WASocket, userId: string): void {
       // Fire autoread without blocking — doesn't need to finish before command processing
       if (settings.autoread) {
         sock.readMessages([msg.key]).catch(() => {});
-      }
-
-      const isStatus = msg.key.remoteJid === "status@broadcast";
-      if (isStatus) {
-        const statusSender = msg.key.participant || "";
-
-        // Run autoview + autolike in parallel for maximum speed
-        const statusTasks: Promise<unknown>[] = [];
-
-        if (settings.autoviewstatus && statusSender && msg.key.id) {
-          statusTasks.push(
-            sock.readMessages([msg.key]).catch(() => {}),
-            sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read").catch(() => {})
-          );
-        }
-
-        if (settings.autolikestatus) {
-          const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
-          const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
-          statusTasks.push(
-            sock.sendMessage("status@broadcast", { react: { text: emoji, key: msg.key } }).catch(() => {})
-          );
-        }
-
-        // Anti-Tag: detect when someone @mentions your group in their status update
-        // ("@ This group was mentioned"). Silently kick from the mentioned group — no DM.
-        if (settings.antitag && statusSender) {
-          const mentionedJids: string[] = (
-            msg.message?.extendedTextMessage?.contextInfo?.mentionedJid ??
-            msg.message?.imageMessage?.contextInfo?.mentionedJid ??
-            msg.message?.videoMessage?.contextInfo?.mentionedJid ??
-            []
-          );
-          const mentionedGroups = mentionedJids.filter(jid => jid.endsWith("@g.us"));
-
-          for (const groupJid of mentionedGroups) {
-            // Silently remove the sender from the group they tagged — no message
-            statusTasks.push(
-              sock.groupParticipantsUpdate(groupJid, [statusSender], "remove").catch(() => {})
-            );
-          }
-        }
-
-        // Fire everything at once — no sequential awaiting
-        if (statusTasks.length > 0) Promise.all(statusTasks).catch(() => {});
-        continue;
       }
 
       // Store for antidelete in memory (no DB write needed)
