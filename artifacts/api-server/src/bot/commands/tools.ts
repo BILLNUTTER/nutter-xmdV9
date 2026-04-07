@@ -1,13 +1,75 @@
-import { WASocket, proto, downloadContentFromMessage } from "@whiskeysockets/baileys";
+import { WASocket, proto, downloadContentFromMessage, downloadMediaMessage } from "@whiskeysockets/baileys";
 import { UserSettings } from "@workspace/db";
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { botInstances } from "../manager.js";
 import { getViewOnce } from "../msg-store.js";
+import { execFile, execSync } from "child_process";
+import { promisify } from "util";
+import { writeFile, readFile, unlink, access } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
+
+const execFileAsync = promisify(execFile);
+
+async function fileExists(p: string): Promise<boolean> {
+  try { await access(p); return true; } catch { return false; }
+}
+
+const FFMPEG_BIN: Promise<string> = (async () => {
+  if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+  try {
+    const p = execSync("which ffmpeg 2>/dev/null", { encoding: "utf8", stdio: ["pipe","pipe","pipe"] }).trim();
+    if (p) return p;
+  } catch {}
+  const candidates = [
+    "/nix/store/s41bqqrym7dlk8m3nk74fx26kgrx0kv8-replit-runtime-path/bin/ffmpeg",
+    "/usr/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+  ];
+  for (const c of candidates) {
+    if (await fileExists(c)) return c;
+  }
+  return "ffmpeg";
+})();
 
 async function streamToBuffer(stream: AsyncIterable<Buffer>): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks);
+}
+
+async function downloadQuotedImage(
+  sock: WASocket,
+  msg: proto.IWebMessageInfo
+): Promise<Buffer | null> {
+  const ctx =
+    msg.message?.extendedTextMessage?.contextInfo ??
+    msg.message?.imageMessage?.contextInfo;
+
+  if (!ctx?.quotedMessage || !ctx.stanzaId) return null;
+  const qm = ctx.quotedMessage;
+  if (!qm.imageMessage) return null;
+
+  const fakeMsg: proto.IWebMessageInfo = {
+    key: {
+      remoteJid: msg.key.remoteJid,
+      fromMe: ctx.participant === (sock as any).user?.id,
+      id: ctx.stanzaId,
+      participant: ctx.participant ?? undefined,
+    },
+    message: qm,
+  };
+
+  try {
+    return await downloadMediaMessage(
+      fakeMsg,
+      "buffer",
+      {},
+      { logger: undefined as any, reuploadRequest: sock.updateMediaMessage }
+    ) as Buffer;
+  } catch {
+    return null;
+  }
 }
 
 const START_TIME = Date.now();
@@ -83,8 +145,42 @@ export async function handleToolsCommand(
     }
     case "say": {
       const text = args.join(" ");
-      if (!text) return;
-      await sock.sendMessage(chatId, { text }, { quoted: msg }).catch(() => {});
+      if (!text) {
+        await sock.sendMessage(chatId, { text: `Usage: ${prefix}say <text>\n\nExample: ${prefix}say Hello world\n\n_NUTTER-XMD ⚡_` }, { quoted: msg }).catch(() => {});
+        return;
+      }
+      try {
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=en&client=tw-ob&ttsspeed=1`;
+        const resp = await fetch(ttsUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; NUTTER-XMD)" } });
+        if (!resp.ok) throw new Error(`TTS fetch failed: ${resp.status}`);
+        const mp3 = Buffer.from(await resp.arrayBuffer());
+
+        const id = randomUUID();
+        const inPath  = join(tmpdir(), `say_in_${id}.mp3`);
+        const outPath = join(tmpdir(), `say_out_${id}.ogg`);
+        await writeFile(inPath, mp3);
+        const bin = await FFMPEG_BIN;
+        try {
+          await execFileAsync(bin, [
+            "-y", "-i", inPath,
+            "-c:a", "libopus", "-b:a", "64k",
+            "-ar", "48000", "-ac", "1",
+            outPath,
+          ]);
+        } finally {
+          await unlink(inPath).catch(() => {});
+        }
+        const ogg = await readFile(outPath);
+        await unlink(outPath).catch(() => {});
+
+        await sock.sendMessage(chatId, {
+          audio: ogg,
+          mimetype: "audio/ogg; codecs=opus",
+          ptt: true,
+        }, { quoted: msg });
+      } catch {
+        await sock.sendMessage(chatId, { text: `❌ TTS failed. Please try again.\n\n_NUTTER-XMD ⚡_` }, { quoted: msg }).catch(() => {});
+      }
       break;
     }
     case "fancy": {
@@ -171,9 +267,57 @@ export async function handleToolsCommand(
       break;
     }
     case "sticker": {
-      await sock.sendMessage(chatId, {
-        text: `🎨 *Sticker Creator*\n\nReply to an image with ${prefix}sticker to convert it.\n\n⚠️ This feature requires additional setup.\n\n_NUTTER-XMD ⚡_`,
-      }, { quoted: msg }).catch(() => {});
+      // Support .sticker when the command message itself IS an image, or when it replies to an image
+      let imgBuf: Buffer | null = null;
+
+      if (msg.message?.imageMessage) {
+        // User sent a photo with ".sticker" as the caption
+        try {
+          const stream = await downloadContentFromMessage(msg.message.imageMessage, "image");
+          imgBuf = await streamToBuffer(stream as AsyncIterable<Buffer>);
+        } catch { imgBuf = null; }
+      }
+
+      if (!imgBuf) {
+        // Try quoted/replied image
+        imgBuf = await downloadQuotedImage(sock, msg);
+      }
+
+      if (!imgBuf) {
+        await sock.sendMessage(chatId, {
+          text: `❌ Reply to an image or send a photo with caption *${prefix}sticker* to convert it into a sticker.\n\n_NUTTER-XMD ⚡_`,
+        }, { quoted: msg }).catch(() => {});
+        break;
+      }
+
+      try {
+        const id = randomUUID();
+        const inPath  = join(tmpdir(), `sticker_in_${id}.jpg`);
+        const outPath = join(tmpdir(), `sticker_out_${id}.webp`);
+        await writeFile(inPath, imgBuf);
+        const bin = await FFMPEG_BIN;
+        try {
+          await execFileAsync(bin, [
+            "-y", "-i", inPath,
+            "-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=white@0",
+            "-c:v", "libwebp",
+            "-lossless", "0",
+            "-quality", "80",
+            "-loop", "0",
+            "-preset", "picture",
+            "-an", "-vsync", "0",
+            outPath,
+          ]);
+        } finally {
+          await unlink(inPath).catch(() => {});
+        }
+        const webp = await readFile(outPath);
+        await unlink(outPath).catch(() => {});
+
+        await sock.sendMessage(chatId, { sticker: webp }, { quoted: msg });
+      } catch {
+        await sock.sendMessage(chatId, { text: `❌ Failed to create sticker. Make sure you replied to a clear image.\n\n_NUTTER-XMD ⚡_` }, { quoted: msg }).catch(() => {});
+      }
       break;
     }
     case "emojimix": {
