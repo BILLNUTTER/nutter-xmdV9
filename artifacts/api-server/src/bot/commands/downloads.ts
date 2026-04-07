@@ -31,13 +31,37 @@ async function fetchBuffer(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
-async function downloadTikTok(url: string): Promise<{ buffer: Buffer; title: string; type: "video" }> {
-  const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&count=12&cursor=0&web=1&hd=1`;
-  const data = (await fetchJson(apiUrl)) as { code: number; msg: string; data?: { play: string; wmplay: string; music: string; title: string } };
-  if (data.code !== 0 || !data.data) {
-    throw new Error(data.msg || "TikTok download failed");
+async function normalizeTikTokUrl(url: string): Promise<string> {
+  // Follow redirects to expand shortened TikTok URLs (vm.tiktok.com, vt.tiktok.com, etc.)
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+    const finalUrl = res.url;
+    // Return the final URL if it looks like a real TikTok URL
+    if (finalUrl.includes("tiktok.com/@") || finalUrl.includes("/video/")) {
+      return finalUrl;
+    }
+    return url;
+  } catch {
+    return url;
   }
-  const videoUrl = data.data.play || data.data.wmplay;
+}
+
+async function downloadTikTok(url: string): Promise<{ buffer: Buffer; title: string; type: "video" }> {
+  const normalizedUrl = await normalizeTikTokUrl(url);
+  const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(normalizedUrl)}&count=12&cursor=0&web=1&hd=1`;
+  const data = (await fetchJson(apiUrl)) as { code: number; msg: string; data?: { play: string; wmplay: string; hdplay?: string; music: string; title: string } };
+  if (data.code !== 0 || !data.data) {
+    throw new Error(data.msg || "TikTok download failed — try copying the full link from the TikTok app");
+  }
+  // Prefer HD, then no-watermark play, then wmplay
+  const videoUrl = data.data.hdplay || data.data.play || data.data.wmplay;
+  if (!videoUrl) throw new Error("No video URL returned by TikTok API");
   const buffer = await fetchBuffer(videoUrl);
   return { buffer, title: data.data.title || "TikTok Video", type: "video" };
 }

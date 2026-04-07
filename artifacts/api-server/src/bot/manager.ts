@@ -184,7 +184,14 @@ function attachHandlers(sock: WASocket, userId: string): void {
       const isStatus = msg.key.remoteJid === "status@broadcast";
       if (isStatus) {
         if (settings.autoviewstatus) {
-          try { await sock.readMessages([msg.key]); } catch (_) {}
+          try {
+            await sock.readMessages([msg.key]);
+            // Also send explicit read receipt to the status sender
+            const participant = msg.key.participant || (msg as unknown as Record<string,string>).participant || "";
+            if (participant && msg.key.id) {
+              await sock.sendReceipt("status@broadcast", participant, [msg.key.id], "read").catch(() => {});
+            }
+          } catch (_) {}
         }
         if (settings.autolikestatus) {
           const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
