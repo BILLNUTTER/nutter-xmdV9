@@ -127,6 +127,17 @@ export default function Register() {
           </p>
         </div>
 
+        <div style={{
+          background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.3)",
+          borderRadius: "0.75rem", padding: "0.85rem 1rem",
+          display: "flex", gap: "0.6rem", alignItems: "flex-start"
+        }}>
+          <span style={{ fontSize: "1rem", flexShrink: 0 }}>⚠️</span>
+          <p style={{ color: "#fbbf24", fontSize: "0.78rem", margin: 0, lineHeight: 1.5 }}>
+            <strong>Important:</strong> Accounts that are created but never linked to a WhatsApp bot may be deleted automatically to free up resources. Link your bot immediately after registering.
+          </p>
+        </div>
+
         <p style={{ textAlign: "center", color: "#334155", fontSize: "0.75rem", marginTop: "1.5rem" }}>
           ⚡ NUTTER-XMD V.9.1.3 — Free, always on
         </p>

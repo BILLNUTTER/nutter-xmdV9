@@ -389,15 +389,31 @@ export default function Dashboard() {
             )}
 
             {bots.length === 0 && !addingBot && (
-              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: "1rem", padding: "3rem", textAlign: "center" }}>
-                <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>🇰🇪</div>
-                <h3 style={{ color: C.text, fontWeight: 700, marginBottom: "0.5rem" }}>No bots yet</h3>
-                <p style={{ color: C.muted, fontSize: "0.875rem", marginBottom: "1.5rem" }}>Add your first WhatsApp bot to get started.</p>
-                <button onClick={() => setAddingBot(true)} style={{
-                  background: "linear-gradient(135deg, #00d4ff, #a855f7)", color: "white",
-                  border: "none", borderRadius: "0.75rem", padding: "0.7rem 2rem",
-                  cursor: "pointer", fontWeight: 700
-                }}>+ Add Your First Bot</button>
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div style={{
+                  background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.35)",
+                  borderRadius: "0.875rem", padding: "0.9rem 1.1rem",
+                  display: "flex", gap: "0.65rem", alignItems: "flex-start"
+                }}>
+                  <span style={{ fontSize: "1.15rem", flexShrink: 0, marginTop: "0.05rem" }}>⚠️</span>
+                  <div>
+                    <p style={{ color: "#fbbf24", fontWeight: 700, fontSize: "0.85rem", margin: "0 0 0.2rem" }}>Action Required — Link a Bot</p>
+                    <p style={{ color: "#fcd34d", fontSize: "0.78rem", margin: 0, lineHeight: 1.55 }}>
+                      Accounts that remain unlinked for an extended period may be <strong>deleted automatically</strong> to free up resources. Please link your WhatsApp bot as soon as possible.
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: "1rem", padding: "3rem", textAlign: "center" }}>
+                  <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>🇰🇪</div>
+                  <h3 style={{ color: C.text, fontWeight: 700, marginBottom: "0.5rem" }}>No bots yet</h3>
+                  <p style={{ color: C.muted, fontSize: "0.875rem", marginBottom: "1.5rem" }}>Add your first WhatsApp bot to get started.</p>
+                  <button onClick={() => setAddingBot(true)} style={{
+                    background: "linear-gradient(135deg, #00d4ff, #a855f7)", color: "white",
+                    border: "none", borderRadius: "0.75rem", padding: "0.7rem 2rem",
+                    cursor: "pointer", fontWeight: 700
+                  }}>+ Add Your First Bot</button>
+                </div>
               </div>
             )}
 
