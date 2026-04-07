@@ -57,6 +57,8 @@ export default function Dashboard() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qrPollRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const countdownRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  const settingsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const badwordsEditingRef = useRef(false);
 
   const token = getToken();
 
@@ -66,6 +68,7 @@ export default function Dashboard() {
     pollRef.current = setInterval(refreshBotStatuses, 4000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (settingsPollRef.current) clearInterval(settingsPollRef.current);
       Object.values(qrPollRef.current).forEach(clearInterval);
       Object.values(countdownRef.current).forEach(clearInterval);
     };
@@ -113,6 +116,30 @@ export default function Dashboard() {
       setBadwordsInput(Array.isArray(words) ? words.join(", ") : "");
     }).catch(() => {});
   }
+
+  // Silent background refresh — updates settings state without touching badwordsInput
+  // while the user is actively typing in that field
+  function silentRefreshSettings(botId: string) {
+    getBotSettings(botId).then(s => {
+      setSettings(s);
+      if (!badwordsEditingRef.current) {
+        const words = s.badwords as string[] | null;
+        setBadwordsInput(Array.isArray(words) ? words.join(", ") : "");
+      }
+    }).catch(() => {});
+  }
+
+  // Poll settings every 5 s so changes made via bot commands appear automatically
+  useEffect(() => {
+    if (settingsPollRef.current) clearInterval(settingsPollRef.current);
+    if (!selectedBotId) return;
+    settingsPollRef.current = setInterval(() => {
+      silentRefreshSettings(selectedBotId);
+    }, 5000);
+    return () => {
+      if (settingsPollRef.current) clearInterval(settingsPollRef.current);
+    };
+  }, [selectedBotId]);
 
   async function handleSaveBadwords() {
     if (!selectedBotId) return;
@@ -605,6 +632,8 @@ export default function Dashboard() {
                                       <textarea
                                         value={badwordsInput}
                                         onChange={e => setBadwordsInput(e.target.value)}
+                                        onFocus={() => { badwordsEditingRef.current = true; }}
+                                        onBlur={() => { badwordsEditingRef.current = false; }}
                                         placeholder="e.g. badword1, badword2, slur"
                                         rows={2}
                                         style={{
