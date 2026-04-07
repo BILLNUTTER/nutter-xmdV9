@@ -1,7 +1,13 @@
-import { WASocket, proto } from "@whiskeysockets/baileys";
+import { WASocket, proto, downloadContentFromMessage } from "@whiskeysockets/baileys";
 import { UserSettings } from "@workspace/db";
 import { randomBytes } from "crypto";
 import { botInstances } from "../manager.js";
+
+async function streamToBuffer(stream: AsyncIterable<Buffer>): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
 
 const START_TIME = Date.now();
 
@@ -177,9 +183,62 @@ export async function handleToolsCommand(
     }
     case "vv":
     case "vv2": {
-      await sock.sendMessage(chatId, {
-        text: `👁️ *View Once Viewer*\n\nReply to a view-once message to view it.\n\n⚠️ This feature requires additional setup.\n\n_NUTTER-XMD ⚡_`,
-      }, { quoted: msg }).catch(() => {});
+      const quotedCtx = msg.message?.extendedTextMessage?.contextInfo;
+      const quotedMsg = quotedCtx?.quotedMessage;
+      if (!quotedMsg) {
+        await sock.sendMessage(chatId, {
+          text: `👁️ *View Once Viewer*\n\nReply to a view-once message with *${prefix}vv* to reveal it and send it to your DM.\n\n_NUTTER-XMD ⚡_`,
+        }, { quoted: msg }).catch(() => {});
+        break;
+      }
+      // Unwrap view-once container
+      const vom = quotedMsg.viewOnceMessage?.message
+        ?? quotedMsg.viewOnceMessageV2?.message
+        ?? quotedMsg.viewOnceMessageV2Extension?.message;
+      if (!vom) {
+        await sock.sendMessage(chatId, {
+          text: `❌ That is not a view-once message.\n\n_NUTTER-XMD ⚡_`,
+        }, { quoted: msg }).catch(() => {});
+        break;
+      }
+      const botPhone = (sock.user?.id || "").split(":")[0].split("@")[0];
+      const dmJid = `${botPhone}@s.whatsapp.net`;
+      const senderName = quotedCtx?.participant?.split("@")[0] ?? "someone";
+      try {
+        if (vom.imageMessage) {
+          const stream = await downloadContentFromMessage(vom.imageMessage, "image");
+          const buffer = await streamToBuffer(stream as unknown as AsyncIterable<Buffer>);
+          await sock.sendMessage(dmJid, {
+            image: buffer,
+            caption: `👁️ *View Once Revealed*\n\nFrom: @${senderName}\n\n_NUTTER-XMD ⚡_`,
+          });
+        } else if (vom.videoMessage) {
+          const stream = await downloadContentFromMessage(vom.videoMessage, "video");
+          const buffer = await streamToBuffer(stream as unknown as AsyncIterable<Buffer>);
+          await sock.sendMessage(dmJid, {
+            video: buffer,
+            caption: `👁️ *View Once Revealed*\n\nFrom: @${senderName}\n\n_NUTTER-XMD ⚡_`,
+          });
+        } else if (vom.audioMessage) {
+          const stream = await downloadContentFromMessage(vom.audioMessage, "audio");
+          const buffer = await streamToBuffer(stream as unknown as AsyncIterable<Buffer>);
+          await sock.sendMessage(dmJid, {
+            audio: buffer,
+            mimetype: "audio/ogg; codecs=opus",
+            pttAudio: true,
+          });
+        } else {
+          await sock.sendMessage(chatId, { text: `❌ Unsupported view-once media type.\n\n_NUTTER-XMD ⚡_` }, { quoted: msg }).catch(() => {});
+          break;
+        }
+        await sock.sendMessage(chatId, {
+          text: `✅ *View Once Revealed!*\n\nSent to your DM.\n\n_NUTTER-XMD ⚡_`,
+        }, { quoted: msg }).catch(() => {});
+      } catch {
+        await sock.sendMessage(chatId, {
+          text: `❌ Failed to reveal view-once message. Try again.\n\n_NUTTER-XMD ⚡_`,
+        }, { quoted: msg }).catch(() => {});
+      }
       break;
     }
     default:

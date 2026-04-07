@@ -239,12 +239,15 @@ function attachHandlers(sock: WASocket, userId: string): void {
       const originalMsg = cached.content as proto.IWebMessageInfo;
       if (!originalMsg?.message) continue;
       const senderJid = key.participant || key.remoteJid;
+      // Send to bot owner's own DM, not back to the group/chat
+      const botPhone = (sock.user?.id || "").split(":")[0].split("@")[0];
+      const dmJid = `${botPhone}@s.whatsapp.net`;
       try {
-        await sock.sendMessage(key.remoteJid, {
-          text: `🔄 *Anti-Delete*\n\n*From:* @${senderJid.split("@")[0]}\n*Deleted message recovered:*`,
+        await sock.sendMessage(dmJid, {
+          text: `🔴 *Anti-Delete Alert*\n\n*From:* @${senderJid.split("@")[0]}\n*Chat:* ${key.remoteJid}\n*Message recovered below:*`,
           mentions: [senderJid],
         });
-        await sock.sendMessage(key.remoteJid, { forward: originalMsg });
+        await sock.sendMessage(dmJid, { forward: originalMsg });
       } catch (_) {}
     }
   });
@@ -315,15 +318,23 @@ async function onLinkingConnected(
   const [dbUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
   const isFirstConn = dbUser?.isFirstConnection !== "false";
 
-  await db
-    .update(usersTable)
-    .set({
-      status: "active",
-      lastSeen: new Date(),
-      isFirstConnection: "false",
-      ...(resolvedPhone ? { phone: resolvedPhone } : {}),
-    })
-    .where(eq(usersTable.id, userId));
+  try {
+    await db
+      .update(usersTable)
+      .set({
+        status: "active",
+        lastSeen: new Date(),
+        isFirstConnection: "false",
+        ...(resolvedPhone ? { phone: resolvedPhone } : {}),
+      })
+      .where(eq(usersTable.id, userId));
+  } catch {
+    await db
+      .update(usersTable)
+      .set({ status: "active", lastSeen: new Date(), isFirstConnection: "false" })
+      .where(eq(usersTable.id, userId))
+      .catch(() => {});
+  }
 
   if (isFirstConn && resolvedPhone) {
     const jid = `${resolvedPhone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
@@ -444,15 +455,24 @@ export async function createBotInstance(
         const [dbUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
         const shouldSendWelcome = dbUser?.isFirstConnection !== "false" && !silentStart;
 
-        await db
-          .update(usersTable)
-          .set({
-            status: "active",
-            lastSeen: new Date(),
-            isFirstConnection: "false",
-            ...(resolvedPhone ? { phone: resolvedPhone } : {}),
-          })
-          .where(eq(usersTable.id, userId));
+        try {
+          await db
+            .update(usersTable)
+            .set({
+              status: "active",
+              lastSeen: new Date(),
+              isFirstConnection: "false",
+              ...(resolvedPhone ? { phone: resolvedPhone } : {}),
+            })
+            .where(eq(usersTable.id, userId));
+        } catch {
+          // Phone already exists in another row — update without the phone field
+          await db
+            .update(usersTable)
+            .set({ status: "active", lastSeen: new Date(), isFirstConnection: "false" })
+            .where(eq(usersTable.id, userId))
+            .catch(() => {});
+        }
 
         if (shouldSendWelcome && resolvedPhone) {
           try {
