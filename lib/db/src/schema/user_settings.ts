@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 export const userSettingsTable = pgTable("user_settings", {
   userId: text("user_id").primaryKey(),
   prefix: text("prefix").notNull().default("."),
-  mode: text("mode").notNull().default("private"),
+  mode: text("mode").notNull().default("public"),
   anticallMsg: text("anticall_msg").default("📵 Calls are not allowed. Please send a message instead."),
   welcomeMsg: text("welcome_msg").default("👋 Welcome {user} to {group}! We're glad to have you here. 🎉"),
   goodbyeMsg: text("goodbye_msg").default("👋 Goodbye {user}! We hope to see you again. 💫"),

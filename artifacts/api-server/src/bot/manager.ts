@@ -99,6 +99,10 @@ function clearQRTimeout(userId: string): void {
   if (t) { clearTimeout(t); qrTimeouts.delete(userId); }
 }
 
+// In-process message cache used by getMessage so Baileys can complete
+// retry-decryption after Bad MAC failures.
+const msgCache = new Map<string, proto.IMessage>();
+
 function makeSocket(version: [number, number, number], authDir: string): Promise<{
   sock: WASocket;
   saveCreds: () => Promise<void>;
@@ -117,6 +121,23 @@ function makeSocket(version: [number, number, number], authDir: string): Promise
       syncFullHistory: false,
       connectTimeoutMs: 60_000,
       keepAliveIntervalMs: 25_000,
+      getMessage: async (key) => {
+        const cacheKey = `${key.remoteJid}:${key.id}`;
+        const cached = msgCache.get(cacheKey);
+        if (cached) return cached;
+        // Attempt to retrieve from antidelete store
+        try {
+          const [stored] = await db
+            .select()
+            .from(messagesTable)
+            .where(eq(messagesTable.messageId, key.id ?? ""));
+          if (stored?.content) {
+            const raw = stored.content as { message?: proto.IMessage };
+            return raw.message ?? undefined;
+          }
+        } catch (_) {}
+        return undefined;
+      },
     });
     return { sock, saveCreds };
   });
@@ -128,12 +149,32 @@ function makeSocket(version: [number, number, number], authDir: string): Promise
  */
 function attachHandlers(sock: WASocket, userId: string): void {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+    if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
+      // For "append" (messages sent from the user's own primary device / secondary
+      // device sync), only process messages that arrived in the last 30 seconds
+      // so historical sync on startup does not trigger commands.
+      if (type === "append") {
+        const msgTime = (Number(msg.messageTimestamp) || 0) * 1000;
+        if (Date.now() - msgTime > 30_000) continue;
+      }
+
+      // Cache every message so getMessage() can supply it for retry-decryption
+      if (msg.message && msg.key.remoteJid && msg.key.id) {
+        msgCache.set(`${msg.key.remoteJid}:${msg.key.id}`, msg.message);
+        if (msgCache.size > 500) {
+          const firstKey = msgCache.keys().next().value;
+          if (firstKey) msgCache.delete(firstKey);
+        }
+      }
+
       if (!msg.message) continue;
 
       const settings = await getCachedSettings(userId);
-      if (!settings) continue;
+      if (!settings) {
+        logger.warn({ userId }, "No settings found for bot — skipping message");
+        continue;
+      }
 
       if (settings.autoread) {
         try { await sock.readMessages([msg.key]); } catch (_) {}

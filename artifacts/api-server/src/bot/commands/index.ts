@@ -30,7 +30,9 @@ export async function handleCommand(
   const messageText = msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
     msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption || "";
+    msg.message?.videoMessage?.caption ||
+    msg.message?.buttonsResponseMessage?.selectedButtonId ||
+    msg.message?.listResponseMessage?.singleSelectReply?.selectedRowId || "";
 
   const prefix = settings.prefix || ".";
   const isGroup = chatId.endsWith("@g.us");
