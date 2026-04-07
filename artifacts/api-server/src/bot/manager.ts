@@ -506,24 +506,47 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
   botInstances.set(userId, instance);
   sock.ev.on("creds.update", saveCreds);
 
-  // Post-pairing event handler: fires after the user enters the code on their phone.
-  // This does NOT need to resolve the pairing code — requestPairingCode below does that.
+  // Promise that resolves when the WebSocket noise handshake is done and the
+  // socket is ready to send protocol messages (connection === 'connecting').
+  // Rejects if the connection closes before ever reaching that state.
+  let socketReadyResolve!: () => void;
+  let socketReadyReject!: (err: Error) => void;
+  const socketReady = new Promise<void>((res, rej) => {
+    socketReadyResolve = res;
+    socketReadyReject = rej;
+  });
+
+  // Timeout guard — if WA servers don't respond in 30 s, give up
+  const connectTimeout = setTimeout(() => {
+    socketReadyReject(new Error("Connection to WhatsApp timed out — please try again"));
+    instance.paused = true;
+    try { sock.end(undefined); } catch (_) {}
+    botInstances.delete(userId);
+  }, 30_000);
+
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect } = update;
 
+    // 'connecting' fires once the WS is open and Baileys has sent the hello
+    // frame — the socket is now ready to accept requestPairingCode
+    if (connection === "connecting") {
+      clearTimeout(connectTimeout);
+      socketReadyResolve();
+    }
+
     if (connection === "close") {
       if (instance.paused) return;
+      clearTimeout(connectTimeout);
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const wasConnected = instance.connected;
+      const rawMsg = (lastDisconnect?.error as Error)?.message ?? "";
 
       if (!wasConnected) {
-        // Dropped before link completed — clean up; route decides whether to retry
+        // Dropped before user entered the code — reject socketReady (idempotent)
+        socketReadyReject(new Error(rawMsg || `Connection closed (code ${statusCode}) — please try again`));
         instance.paused = true;
         botInstances.delete(userId);
-        logger.warn(
-          { userId, statusCode, rawError: (lastDisconnect?.error as Error)?.message },
-          "Pairing socket closed before link completed"
-        );
+        logger.warn({ userId, statusCode, rawError: rawMsg }, "Pairing socket closed before link completed");
         return;
       }
 
@@ -540,11 +563,11 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
     }
   });
 
-  // Call requestPairingCode immediately after creating the socket.
-  // Baileys queues this internally and sends it once the WebSocket + noise
-  // handshake is complete — exactly like the official Baileys example.
-  // No event handler timing tricks or artificial delays needed.
+  // Wait for the socket to be ready, THEN request the pairing code.
+  // 'connection === connecting' is the correct signal: WS open + hello sent.
   try {
+    logger.info({ userId, cleanPhone }, "Waiting for WA connection...");
+    await socketReady;
     logger.info({ userId, cleanPhone }, "Requesting pairing code...");
     const code = await sock.requestPairingCode(cleanPhone);
     return code;
@@ -552,7 +575,9 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
     instance.paused = true;
     try { sock.end(undefined); } catch (_) {}
     botInstances.delete(userId);
-    throw err instanceof Error ? err : new Error("Failed to get pairing code");
+    const msg = err instanceof Error ? err.message : "Failed to get pairing code";
+    logger.error({ userId, err }, "requestPairingCode failed: %s", msg);
+    throw new Error(msg);
   }
 }
 
