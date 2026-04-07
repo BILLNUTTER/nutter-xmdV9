@@ -1,6 +1,7 @@
 import { WASocket, proto } from "@whiskeysockets/baileys";
 import { UserSettings } from "@workspace/db";
 import { logger } from "../../lib/logger.js";
+import OpenAI from "openai";
 import { handleMenuCommand } from "./menu.js";
 import { handleSettingsCommand } from "./settings.js";
 import { handleGroupCommand } from "./group.js";
@@ -38,11 +39,50 @@ export async function handleCommand(
   const isGroup = chatId.endsWith("@g.us");
 
   if (!messageText.startsWith(prefix)) {
-    // Never auto-reply to the bot's own outgoing messages
-    if (settings.chatbot && !isGroup && !msg.key.fromMe) {
-      await sock.sendMessage(chatId, {
-        text: `🇰🇪 Auto-reply is on. Type *${prefix}menu* to see available commands.\n\n_Powered by *NUTTER-XMD* ⚡_`,
-      }).catch(() => {});
+    // AI-powered chatbot autoreply — only in private chats, never for own messages
+    if (settings.chatbot && !isGroup && !msg.key.fromMe && messageText.trim()) {
+      try {
+        const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+        const apiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? "placeholder";
+        if (!baseURL) throw new Error("OpenAI proxy not configured");
+        const openai  = new OpenAI({ baseURL, apiKey });
+
+        // Show typing indicator while generating
+        await sock.sendPresenceUpdate("composing", chatId).catch(() => {});
+
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a friendly, helpful WhatsApp assistant powered by NUTTER-XMD. " +
+                "You reply naturally like a real Kenyan person — comfortably mixing English and Swahili (Sheng style). " +
+                "Keep replies short and conversational (1–4 sentences). " +
+                "No heavy markdown, no bullet lists unless truly needed. " +
+                "Be warm, witty, helpful, and human. " +
+                "Answer questions, respond to greetings, jokes, rants — anything — the way a knowledgeable friend would on WhatsApp. " +
+                "If asked who you are, say you are NUTTER-XMD, a smart WhatsApp bot. " +
+                `To use bot commands, the user types ${prefix}menu.`,
+            },
+            { role: "user", content: messageText.trim() },
+          ],
+          max_completion_tokens: 350,
+        });
+
+        const reply = completion.choices[0]?.message?.content?.trim();
+        await sock.sendPresenceUpdate("paused", chatId).catch(() => {});
+
+        if (reply) {
+          await sock.sendMessage(chatId, { text: reply }, { quoted: msg }).catch(() => {});
+        }
+      } catch (err) {
+        logger.warn({ err }, "Chatbot AI reply failed — using fallback");
+        await sock.sendPresenceUpdate("paused", chatId).catch(() => {});
+        await sock.sendMessage(chatId, {
+          text: `Sawa! Niko hapa. Type *${prefix}menu* to see what I can do. 🇰🇪⚡`,
+        }, { quoted: msg }).catch(() => {});
+      }
     }
     return;
   }
