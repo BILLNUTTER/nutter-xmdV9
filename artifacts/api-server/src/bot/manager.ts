@@ -37,10 +37,7 @@ export interface BotInstance {
 }
 
 export const botInstances = new Map<string, BotInstance>();
-export const pendingPairings = new Map<string, {
-  resolve: (code: string) => void;
-  reject: (err: Error) => void;
-}>();
+
 export const pendingQRCodes = new Map<string, string>();
 
 const creatingInstances = new Set<string>();
@@ -485,125 +482,78 @@ export async function createBotInstance(
 }
 
 export async function initiatePairing(userId: string, sessionId: string, phone: string): Promise<string> {
-  return new Promise(async (resolve, reject) => {
-    const existing = botInstances.get(userId);
-    if (existing) {
-      existing.paused = true;
-      try { existing.socket.end(undefined); } catch (_) {}
-      botInstances.delete(userId);
-    }
-    creatingInstances.delete(userId);
-    pendingQRCodes.delete(userId);
+  const cleanPhone = phone.replace(/[^0-9]/g, "");
 
-    // Always wipe any stale partial session data before a new pairing attempt.
-    // requestPairingCode triggers creds.update which persists an incomplete
-    // auth state; the next retry must start with fresh initAuthCreds() or the
-    // noise handshake uses a mismatched key and WhatsApp rejects the connection.
-    await clearDatabaseSession(sessionId).catch(() => {});
+  // Tear down any existing (non-connected) socket for this user
+  const existing = botInstances.get(userId);
+  if (existing) {
+    existing.paused = true;
+    try { existing.socket.end(undefined); } catch (_) {}
+    botInstances.delete(userId);
+  }
+  creatingInstances.delete(userId);
+  pendingQRCodes.delete(userId);
 
-    let version: [number, number, number];
-    try {
-      version = await getBaileysVersion();
-    } catch (err) {
-      reject(err as Error);
-      return;
-    }
+  // Wipe stale partial auth state so every attempt starts with fresh credentials.
+  // requestPairingCode writes ephemeral keys to the DB via creds.update; if the
+  // connection then drops, the next attempt must not reuse those partial keys.
+  await clearDatabaseSession(sessionId).catch(() => {});
 
-    const { state, saveCreds } = await useDatabaseAuthState(sessionId);
-    const sock = makeSocket(version, state);
-    const instance: BotInstance = { socket: sock, userId, sessionId, phone, paused: false, connected: false };
-    botInstances.set(userId, instance);
-    sock.ev.on("creds.update", saveCreds);
+  const version = await getBaileysVersion();
+  const { state, saveCreds } = await useDatabaseAuthState(sessionId);
+  const sock = makeSocket(version, state);
+  const instance: BotInstance = { socket: sock, userId, sessionId, phone, paused: false, connected: false };
+  botInstances.set(userId, instance);
+  sock.ev.on("creds.update", saveCreds);
 
-    pendingPairings.set(userId, { resolve, reject });
+  // Post-pairing event handler: fires after the user enters the code on their phone.
+  // This does NOT need to resolve the pairing code — requestPairingCode below does that.
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect } = update;
 
-    // Safety net: if nothing resolves within 90 s, clean up.
-    const pairingTimeout = setTimeout(() => {
-      const pending = pendingPairings.get(userId);
-      if (pending) {
-        pending.reject(new Error("Pairing timed out — please try again"));
-        pendingPairings.delete(userId);
-      }
-      const inst = botInstances.get(userId);
-      if (inst && !inst.connected) {
-        inst.paused = true;
-        try { inst.socket.end(undefined); } catch (_) {}
+    if (connection === "close") {
+      if (instance.paused) return;
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+      const wasConnected = instance.connected;
+
+      if (!wasConnected) {
+        // Dropped before link completed — clean up; route decides whether to retry
+        instance.paused = true;
         botInstances.delete(userId);
-      }
-    }, 90_000);
-
-    // requestPairingCode is called as soon as the noise handshake completes
-    // (Baileys emits connection === 'connecting' at that moment). No artificial
-    // delay — this fires WhatsApp's "enter code" notification immediately.
-    let pairCodeRequested = false;
-
-    sock.ev.on("connection.update", async (update) => {
-      const { connection, lastDisconnect } = update;
-
-      // Noise handshake done → request code right away
-      if (connection === "connecting" && !pairCodeRequested) {
-        pairCodeRequested = true;
-        try {
-          const cleanPhone = phone.replace(/[^0-9]/g, "");
-          logger.info({ userId, cleanPhone }, "Requesting pairing code...");
-          const code = await sock.requestPairingCode(cleanPhone);
-          if (code) {
-            const pending = pendingPairings.get(userId);
-            if (pending) {
-              pending.resolve(code);
-              pendingPairings.delete(userId);
-            }
-          }
-        } catch (err) {
-          const pending = pendingPairings.get(userId);
-          if (pending) {
-            pending.reject(err as Error);
-            pendingPairings.delete(userId);
-          }
-        }
+        logger.warn(
+          { userId, statusCode, rawError: (lastDisconnect?.error as Error)?.message },
+          "Pairing socket closed before link completed"
+        );
+        return;
       }
 
-      if (connection === "close") {
-        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        const currentInstance = botInstances.get(userId);
-        const isPaused = currentInstance?.paused ?? false;
-        const wasConnected = currentInstance?.connected ?? false;
+      // Was fully linked — reconnect normally
+      const attempts = reconnectAttempts.get(userId) ?? 0;
+      const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
+      reconnectAttempts.set(userId, attempts + 1);
+      setTimeout(() => createBotInstance(userId, sessionId, phone, false, wasConnected).catch(() => {}), delay);
+    }
 
-        if (isPaused) return;
-
-        if (!wasConnected) {
-          // Connection dropped before the user entered the pairing code.
-          clearTimeout(pairingTimeout);
-          const pending = pendingPairings.get(userId);
-          if (pending) {
-            const rawMsg = (lastDisconnect?.error as Error)?.message ?? "";
-            const detail = rawMsg ? ` (${rawMsg})` : statusCode ? ` (code ${statusCode})` : "";
-            pending.reject(new Error(`Connection lost${detail} — please try again`));
-            pendingPairings.delete(userId);
-          }
-          botInstances.delete(userId);
-          logger.warn(
-            { userId, statusCode, rawError: (lastDisconnect?.error as Error)?.message },
-            "Pairing socket closed before link completed — route will retry"
-          );
-          return;
-        }
-
-        // Was connected: normal reconnect flow via createBotInstance
-        clearTimeout(pairingTimeout);
-        const attempts = reconnectAttempts.get(userId) ?? 0;
-        const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
-        reconnectAttempts.set(userId, attempts + 1);
-        setTimeout(() => createBotInstance(userId, sessionId, phone, false, wasConnected).catch(() => {}), delay);
-      }
-
-      if (connection === "open") {
-        clearTimeout(pairingTimeout);
-        logger.info({ userId }, "Paired and connected!");
-        await onLinkingConnected(sock, userId, phone);
-      }
-    });
+    if (connection === "open") {
+      logger.info({ userId }, "Paired and connected!");
+      await onLinkingConnected(sock, userId, phone);
+    }
   });
+
+  // Call requestPairingCode immediately after creating the socket.
+  // Baileys queues this internally and sends it once the WebSocket + noise
+  // handshake is complete — exactly like the official Baileys example.
+  // No event handler timing tricks or artificial delays needed.
+  try {
+    logger.info({ userId, cleanPhone }, "Requesting pairing code...");
+    const code = await sock.requestPairingCode(cleanPhone);
+    return code;
+  } catch (err) {
+    instance.paused = true;
+    try { sock.end(undefined); } catch (_) {}
+    botInstances.delete(userId);
+    throw err instanceof Error ? err : new Error("Failed to get pairing code");
+  }
 }
 
 export async function initiateQR(userId: string, sessionId: string): Promise<void> {
