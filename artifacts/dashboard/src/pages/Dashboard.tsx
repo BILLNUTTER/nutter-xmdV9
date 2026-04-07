@@ -229,7 +229,7 @@ export default function Dashboard() {
       const { code } = await startPairing(botId, clean);
       setPairingCode(prev => ({ ...prev, [botId]: code }));
       setLinkMode(prev => ({ ...prev, [botId]: "pair" }));
-      startCountdown(botId, 180);
+      startCountdown(botId, 60);
     } catch (err) {
       setLinkError(prev => ({ ...prev, [botId]: err instanceof Error ? err.message : "Failed to pair" }));
     } finally {

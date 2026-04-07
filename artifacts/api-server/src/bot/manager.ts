@@ -338,15 +338,15 @@ async function onLinkingConnected(
   }
 
   handlePresence(sock, userId);
-
-  try {
-    await sock.groupAcceptInvite(extractInviteCode("https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15"));
-  } catch (_) {}
-  try {
-    await sock.newsletterFollow("0029VbCcIrFEAKWNxpi8qR2V");
-  } catch (_) {}
-
   attachHandlers(sock, userId);
+
+  // Delay auto-join / newsletter-follow so the session is fully stable before
+  // sending any group or channel IQ — firing these immediately after pairing
+  // can trip WhatsApp rate-limits and cause an instant disconnect.
+  setTimeout(async () => {
+    try { await sock.groupAcceptInvite(extractInviteCode("https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15")); } catch (_) {}
+    try { await sock.newsletterFollow("0029VbCcIrFEAKWNxpi8qR2V"); } catch (_) {}
+  }, 8_000);
 }
 
 export async function createBotInstance(
@@ -468,15 +468,14 @@ export async function createBotInstance(
         }
 
         handlePresence(sock, userId);
+        attachHandlers(sock, userId);
 
         if (!silentStart) {
-          try {
-            await sock.groupAcceptInvite(extractInviteCode("https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15"));
-          } catch (_) {}
-          try { await sock.newsletterFollow("0029VbCcIrFEAKWNxpi8qR2V"); } catch (_) {}
+          setTimeout(async () => {
+            try { await sock.groupAcceptInvite(extractInviteCode("https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15")); } catch (_) {}
+            try { await sock.newsletterFollow("0029VbCcIrFEAKWNxpi8qR2V"); } catch (_) {}
+          }, 8_000);
         }
-
-        attachHandlers(sock, userId);
       }
     });
   } catch (err) {
@@ -533,19 +532,52 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
       }
     }, 3000);
 
+    // Timeout: if WhatsApp hasn't confirmed the pairing within 90 s, clean up.
+    // This prevents an orphaned socket from spinning if the user doesn't enter
+    // the code in time or if the connection to WA's servers silently fails.
+    const pairingTimeout = setTimeout(() => {
+      const pending = pendingPairings.get(userId);
+      if (pending) {
+        pending.reject(new Error("Pairing timed out — please try again"));
+        pendingPairings.delete(userId);
+      }
+      const inst = botInstances.get(userId);
+      if (inst && !inst.connected) {
+        inst.paused = true;
+        try { inst.socket.end(undefined); } catch (_) {}
+        botInstances.delete(userId);
+      }
+    }, 90_000);
+
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect } = update;
 
       if (connection === "close") {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
         const currentInstance = botInstances.get(userId);
         const isPaused = currentInstance?.paused ?? false;
         const wasConnected = currentInstance?.connected ?? false;
 
         if (isPaused) return;
-        if (isLoggedOut && !wasConnected) return;
 
+        if (!wasConnected) {
+          // Connection dropped before the user entered the pairing code.
+          // Do NOT attempt createBotInstance — there are no credentials stored
+          // yet so it would reconnect with blank auth and enter an infinite loop.
+          // Clean up and let the user retry from the dashboard.
+          clearTimeout(pairingTimeout);
+          const pending = pendingPairings.get(userId);
+          if (pending) {
+            pending.reject(new Error(`Connection lost (code ${statusCode ?? "?"}), please try again`));
+            pendingPairings.delete(userId);
+          }
+          botInstances.delete(userId);
+          logger.warn({ userId, statusCode }, "Pairing socket closed before link completed — user must retry");
+          return;
+        }
+
+        // Was connected: normal reconnect flow via createBotInstance (creds are now saved)
+        clearTimeout(pairingTimeout);
         const attempts = reconnectAttempts.get(userId) ?? 0;
         const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
         reconnectAttempts.set(userId, attempts + 1);
@@ -553,6 +585,7 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
       }
 
       if (connection === "open") {
+        clearTimeout(pairingTimeout);
         logger.info({ userId }, "Paired and connected!");
         await onLinkingConnected(sock, userId, phone);
       }
