@@ -223,6 +223,8 @@ export async function handleToolsCommand(
 
       const botPhone = (sock.user?.id || "").split(":")[0].split("@")[0];
       const dmJid = `${botPhone}@s.whatsapp.net`;
+      // vv → reveal in the same chat; vv2 → send to DM only
+      const targetJid = command === "vv2" ? dmJid : chatId;
       const senderJid = ctx?.participant ?? ctx?.remoteJid ?? "";
       const senderName = senderJid.split("@")[0] || "someone";
 
@@ -230,29 +232,31 @@ export async function handleToolsCommand(
         if (imgMsg) {
           const stream = await downloadContentFromMessage(imgMsg, "image");
           const buffer = await streamToBuffer(stream as unknown as AsyncIterable<Buffer>);
-          await sock.sendMessage(dmJid, {
+          await sock.sendMessage(targetJid, {
             image: buffer,
             caption: `👁️ *View Once Revealed*\n\nFrom: @${senderName}\n\n_NUTTER-XMD ⚡_`,
-          });
+          }, command === "vv" ? { quoted: msg } : undefined);
         } else if (vidMsg) {
           const stream = await downloadContentFromMessage(vidMsg, "video");
           const buffer = await streamToBuffer(stream as unknown as AsyncIterable<Buffer>);
-          await sock.sendMessage(dmJid, {
+          await sock.sendMessage(targetJid, {
             video: buffer,
             caption: `👁️ *View Once Revealed*\n\nFrom: @${senderName}\n\n_NUTTER-XMD ⚡_`,
-          });
+          }, command === "vv" ? { quoted: msg } : undefined);
         } else if (audMsg) {
           const stream = await downloadContentFromMessage(audMsg, "audio");
           const buffer = await streamToBuffer(stream as unknown as AsyncIterable<Buffer>);
-          await sock.sendMessage(dmJid, {
+          await sock.sendMessage(targetJid, {
             audio: buffer,
             mimetype: "audio/ogg; codecs=opus",
             pttAudio: true,
-          });
+          }, command === "vv" ? { quoted: msg } : undefined);
         }
-        await sock.sendMessage(chatId, {
-          text: `✅ *View Once Revealed!*\n\nSent to your DM.\n\n_NUTTER-XMD ⚡_`,
-        }, { quoted: msg }).catch(() => {});
+        if (command === "vv2") {
+          await sock.sendMessage(chatId, {
+            text: `✅ *View Once Revealed!*\n\nSent to your DM privately.\n\n_NUTTER-XMD ⚡_`,
+          }, { quoted: msg }).catch(() => {});
+        }
       } catch (e) {
         await sock.sendMessage(chatId, {
           text: `❌ Failed to reveal: ${(e as Error).message || "Try again"}\n\n_NUTTER-XMD ⚡_`,
