@@ -1,11 +1,11 @@
 import makeWASocket, {
   DisconnectReason,
-  useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   Browsers,
   proto,
   WASocket,
+  type AuthenticationCreds,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { v4 as uuidv4 } from "uuid";
@@ -13,13 +13,14 @@ import { join } from "path";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import QRCode from "qrcode";
 import { db } from "@workspace/db";
-import { usersTable, userSettingsTable, messagesTable } from "@workspace/db";
+import { usersTable, userSettingsTable, messagesTable, botSessionsTable } from "@workspace/db";
 import { eq, lt, and } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { handleCommand } from "./commands/index.js";
 import { handleProtection } from "./protection.js";
 import { handlePresence } from "./presence.js";
 import { getCachedSettings, invalidateSettingsCache } from "./settings-cache.js";
+import { useDatabaseAuthState, hasStoredSession } from "./db-auth-state.js";
 import pino from "pino";
 
 const AUTH_DIR = join(process.cwd(), "sessions");
@@ -100,46 +101,43 @@ function clearQRTimeout(userId: string): void {
 }
 
 // In-process message cache used by getMessage so Baileys can complete
-// retry-decryption after Bad MAC failures.
+// retry-decryption after Bad MAC failures. 2000 entries for 100+ bots.
 const msgCache = new Map<string, proto.IMessage>();
 
-function makeSocket(version: [number, number, number], authDir: string): Promise<{
-  sock: WASocket;
-  saveCreds: () => Promise<void>;
-}> {
-  return useMultiFileAuthState(authDir).then(({ state, saveCreds }) => {
-    const sock = makeWASocket({
-      version,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, makeBaileysLogger()),
-      },
-      printQRInTerminal: false,
-      logger: makeBaileysLogger(),
-      browser: Browsers.ubuntu("Chrome"),
-      generateHighQualityLinkPreview: false,
-      syncFullHistory: false,
-      connectTimeoutMs: 60_000,
-      keepAliveIntervalMs: 25_000,
-      getMessage: async (key) => {
-        const cacheKey = `${key.remoteJid}:${key.id}`;
-        const cached = msgCache.get(cacheKey);
-        if (cached) return cached;
-        // Attempt to retrieve from antidelete store
-        try {
-          const [stored] = await db
-            .select()
-            .from(messagesTable)
-            .where(eq(messagesTable.messageId, key.id ?? ""));
-          if (stored?.content) {
-            const raw = stored.content as { message?: proto.IMessage };
-            return raw.message ?? undefined;
-          }
-        } catch (_) {}
-        return undefined;
-      },
-    });
-    return { sock, saveCreds };
+function makeSocket(
+  version: [number, number, number],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  state: { creds: AuthenticationCreds; keys: any }
+): WASocket {
+  return makeWASocket({
+    version,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, makeBaileysLogger()),
+    },
+    printQRInTerminal: false,
+    logger: makeBaileysLogger(),
+    browser: Browsers.ubuntu("Chrome"),
+    generateHighQualityLinkPreview: false,
+    syncFullHistory: false,
+    connectTimeoutMs: 60_000,
+    keepAliveIntervalMs: 25_000,
+    getMessage: async (key) => {
+      const cacheKey = `${key.remoteJid}:${key.id}`;
+      const cached = msgCache.get(cacheKey);
+      if (cached) return cached;
+      try {
+        const [stored] = await db
+          .select()
+          .from(messagesTable)
+          .where(eq(messagesTable.messageId, key.id ?? ""));
+        if (stored?.content) {
+          const raw = stored.content as { message?: proto.IMessage };
+          return raw.message ?? undefined;
+        }
+      } catch (_) {}
+      return undefined;
+    },
   });
 }
 
@@ -168,7 +166,7 @@ function attachHandlers(sock: WASocket, userId: string): void {
       const msgKey = `${msg.key.remoteJid}:${msg.key.id}`;
       if (processedMsgIds.has(msgKey)) continue;
       processedMsgIds.add(msgKey);
-      if (processedMsgIds.size > 1000) {
+      if (processedMsgIds.size > 2000) {
         const firstKey = processedMsgIds.values().next().value;
         if (firstKey) processedMsgIds.delete(firstKey);
       }
@@ -176,7 +174,7 @@ function attachHandlers(sock: WASocket, userId: string): void {
       // Cache every message so getMessage() can supply it for retry-decryption
       if (msg.message && msg.key.remoteJid && msg.key.id) {
         msgCache.set(`${msg.key.remoteJid}:${msg.key.id}`, msg.message);
-        if (msgCache.size > 500) {
+        if (msgCache.size > 2000) {
           const firstKey = msgCache.keys().next().value;
           if (firstKey) msgCache.delete(firstKey);
         }
@@ -383,9 +381,9 @@ export async function createBotInstance(
 
   creatingInstances.add(userId);
   try {
-    const authDir = getAuthDir(userId);
     const version = await getBaileysVersion();
-    const { sock, saveCreds } = await makeSocket(version, authDir);
+    const { state, saveCreds } = await useDatabaseAuthState(userId);
+    const sock = makeSocket(version, state);
 
     const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
     botInstances.set(userId, instance);
@@ -505,9 +503,10 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
     creatingInstances.delete(userId);
     pendingQRCodes.delete(userId);
 
-    const authDir = getAuthDir(userId);
-    try { rmSync(authDir, { recursive: true, force: true }); } catch (_) {}
-    mkdirSync(authDir, { recursive: true });
+    // Clear any stored session so the new pairing starts fresh
+    await db.delete(botSessionsTable).where(eq(botSessionsTable.botId, userId)).catch(() => {});
+    // Also clear local filesystem session if present (local dev / migration)
+    try { rmSync(getAuthDir(userId), { recursive: true, force: true }); } catch (_) {}
 
     let version: [number, number, number];
     try {
@@ -517,7 +516,8 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       return;
     }
 
-    const { sock, saveCreds } = await makeSocket(version, authDir);
+    const { state, saveCreds } = await useDatabaseAuthState(userId);
+    const sock = makeSocket(version, state);
     const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
     botInstances.set(userId, instance);
     sock.ev.on("creds.update", saveCreds);
@@ -584,12 +584,13 @@ export async function initiateQR(userId: string): Promise<void> {
   creatingInstances.delete(userId);
   pendingQRCodes.delete(userId);
 
-  const authDir = getAuthDir(userId);
-  try { rmSync(authDir, { recursive: true, force: true }); } catch (_) {}
-  mkdirSync(authDir, { recursive: true });
+  // Clear any stored session so the new QR scan starts fresh
+  await db.delete(botSessionsTable).where(eq(botSessionsTable.botId, userId)).catch(() => {});
+  try { rmSync(getAuthDir(userId), { recursive: true, force: true }); } catch (_) {}
 
   const version = await getBaileysVersion();
-  const { sock, saveCreds } = await makeSocket(version, authDir);
+  const { state, saveCreds } = await useDatabaseAuthState(userId);
+  const sock = makeSocket(version, state);
 
   const instance: BotInstance = { socket: sock, userId, phone: null, paused: false, connected: false };
   botInstances.set(userId, instance);
@@ -672,8 +673,9 @@ export async function deleteBotSession(userId: string): Promise<void> {
   }
 
   pendingQRCodes.delete(userId);
-  const authDir = getAuthDir(userId);
-  try { rmSync(authDir, { recursive: true, force: true }); } catch (_) {}
+  // Remove from DB (primary) and filesystem (local dev / migration)
+  await db.delete(botSessionsTable).where(eq(botSessionsTable.botId, userId)).catch(() => {});
+  try { rmSync(getAuthDir(userId), { recursive: true, force: true }); } catch (_) {}
 }
 
 export async function pauseBotInstance(userId: string): Promise<void> {
@@ -702,22 +704,42 @@ export async function disconnectBotInstance(userId: string): Promise<void> {
   }
 }
 
+// Restore bots in small batches to avoid thundering-herd on startup.
+// Each batch connects BATCH_SIZE bots in parallel, then waits before the next.
+const RESTORE_BATCH_SIZE = 5;
+const RESTORE_BATCH_DELAY_MS = 3_000;
+
 export async function restoreAllSessions(): Promise<void> {
   const users = await db.select().from(usersTable).where(eq(usersTable.status, "active"));
-  logger.info({ count: users.length }, "Restoring bot sessions...");
+
+  // Filter to only bots that actually have a stored session (DB or filesystem)
+  const restorable: typeof users = [];
   for (const user of users) {
     if (!user.sessionId) continue;
-    const authDir = getAuthDir(user.id);
-    const credsPath = join(authDir, "creds.json");
-    if (!existsSync(credsPath)) {
-      logger.info({ userId: user.id }, "Skipping restore — no saved credentials");
-      continue;
-    }
-    logger.info({ userId: user.id, phone: user.phone }, "Restoring session...");
-    await createBotInstance(user.id, user.phone, false, true).catch((err) =>
-      logger.error({ err, userId: user.id }, "Failed to restore session")
-    );
+    const inDb = await hasStoredSession(user.id);
+    const onDisk = existsSync(join(getAuthDir(user.id), "creds.json"));
+    if (inDb || onDisk) restorable.push(user);
+    else logger.info({ userId: user.id }, "Skipping restore — no saved credentials");
   }
+
+  logger.info({ total: restorable.length, batchSize: RESTORE_BATCH_SIZE }, "Restoring bot sessions in batches...");
+
+  for (let i = 0; i < restorable.length; i += RESTORE_BATCH_SIZE) {
+    const batch = restorable.slice(i, i + RESTORE_BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map((user) => {
+        logger.info({ userId: user.id, phone: user.phone }, "Restoring session...");
+        return createBotInstance(user.id, user.phone, false, true).catch((err) =>
+          logger.error({ err, userId: user.id }, "Failed to restore session")
+        );
+      })
+    );
+    if (i + RESTORE_BATCH_SIZE < restorable.length) {
+      await new Promise((r) => setTimeout(r, RESTORE_BATCH_DELAY_MS));
+    }
+  }
+
+  logger.info({ restored: restorable.length }, "Session restore complete");
 }
 
 export function cleanupExpiredMessages(): void {
