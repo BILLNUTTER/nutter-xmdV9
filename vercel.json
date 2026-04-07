@@ -1,7 +1,7 @@
 {
   "version": 2,
   "buildCommand": "pnpm --filter @workspace/dashboard build",
-  "outputDirectory": "artifacts/dashboard/dist/public",
+  "outputDirectory": "artifacts/dashboard/dist",
   "installCommand": "pnpm install --no-frozen-lockfile",
   "framework": null,
   "rewrites": [
