@@ -13,10 +13,25 @@ import {
   disconnectBotInstance,
 } from "../bot/manager.js";
 import { stopPresence } from "../bot/presence.js";
+import { invalidateSettingsCache, setSettingsCache } from "../bot/settings-cache.js";
 
 const router = Router();
 
 type AuthRequest = Request & { accountId?: string };
+
+// Simple in-memory rate limiter
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(key);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= max) return false;
+  entry.count++;
+  return true;
+}
 
 async function getBotForAccount(botId: string, accountId: string) {
   const [bot] = await db
@@ -120,6 +135,11 @@ router.post("/bots/:botId/pair", requireAuth, async (req: AuthRequest, res) => {
   const accountId = req.accountId!;
   const { phone } = req.body as { phone: string };
 
+  if (!checkRateLimit(`pair:${accountId}`, 4, 60_000)) {
+    res.status(429).json({ error: "Too many pairing requests. Please wait a minute." });
+    return;
+  }
+
   if (!phone) {
     res.status(400).json({ error: "Phone number required" });
     return;
@@ -155,6 +175,11 @@ router.post("/bots/:botId/pair", requireAuth, async (req: AuthRequest, res) => {
 router.post("/bots/:botId/qr-start", requireAuth, async (req: AuthRequest, res) => {
   const { botId } = req.params;
   const accountId = req.accountId!;
+
+  if (!checkRateLimit(`qr:${accountId}`, 4, 60_000)) {
+    res.status(429).json({ error: "Too many QR requests. Please wait a minute." });
+    return;
+  }
 
   const bot = await getBotForAccount(botId, accountId);
   if (!bot) {
@@ -268,6 +293,7 @@ router.patch("/bots/:botId/settings", requireAuth, async (req: AuthRequest, res)
     return;
   }
 
+  setSettingsCache(botId, updated);
   res.json(updated);
 });
 

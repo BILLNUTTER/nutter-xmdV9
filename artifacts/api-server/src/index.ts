@@ -4,6 +4,14 @@ import { restoreAllSessions, cleanupExpiredMessages } from "./bot/manager.js";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception — server continues");
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.error({ reason }, "Unhandled promise rejection — server continues");
+});
+
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
