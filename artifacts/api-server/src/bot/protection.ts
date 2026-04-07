@@ -78,26 +78,9 @@ export async function handleProtection(
       return;
     }
 
-    // Anti-Tag: delete messages where someone @mentions others in the group
-    // without permission (mass-tag / status-mention spam).
+    // Anti-Tag: block group invite links shared in the group chat
+    // (antitag for status updates — mentioning groups in stories — is handled in the status event handler)
     if (settings.antitag) {
-      const mentionedJids: string[] =
-        msg.message?.extendedTextMessage?.contextInfo?.mentionedJid ||
-        msg.message?.imageMessage?.contextInfo?.mentionedJid ||
-        msg.message?.videoMessage?.contextInfo?.mentionedJid ||
-        msg.message?.documentMessage?.contextInfo?.mentionedJid ||
-        [];
-
-      if (mentionedJids.length > 0 && !msg.key.fromMe) {
-        await applyAction(
-          sock, chatId, sender, msg.key,
-          settings.antitagAction ?? "delete",
-          "Tagging (@mentioning) members is not allowed here!"
-        );
-        return;
-      }
-
-      // Also block WhatsApp group invite link spam
       if (GROUP_LINK_REGEX.test(messageContent)) {
         GROUP_LINK_REGEX.lastIndex = 0;
         await applyAction(

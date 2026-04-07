@@ -183,13 +183,12 @@ function attachHandlers(sock: WASocket, userId: string): void {
 
       const isStatus = msg.key.remoteJid === "status@broadcast";
       if (isStatus) {
+        const statusSender = msg.key.participant || "";
         if (settings.autoviewstatus) {
           try {
             await sock.readMessages([msg.key]);
-            // Also send explicit read receipt to the status sender
-            const participant = msg.key.participant || (msg as unknown as Record<string,string>).participant || "";
-            if (participant && msg.key.id) {
-              await sock.sendReceipt("status@broadcast", participant, [msg.key.id], "read").catch(() => {});
+            if (statusSender && msg.key.id) {
+              await sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read").catch(() => {});
             }
           } catch (_) {}
         }
@@ -199,6 +198,22 @@ function attachHandlers(sock: WASocket, userId: string): void {
           try {
             await sock.sendMessage("status@broadcast", { react: { text: emoji, key: msg.key } });
           } catch (_) {}
+        }
+        // Anti-Tag: detect when someone posts a group invite link in their status (story)
+        if (settings.antitag && statusSender) {
+          const statusText =
+            msg.message?.conversation ||
+            msg.message?.extendedTextMessage?.text ||
+            msg.message?.imageMessage?.caption ||
+            msg.message?.videoMessage?.caption || "";
+          const GROUP_LINK_RE = /chat\.whatsapp\.com\/[A-Za-z0-9]+/i;
+          if (GROUP_LINK_RE.test(statusText)) {
+            try {
+              await sock.sendMessage(statusSender, {
+                text: `⚠️ *Anti-Tag Alert*\n\nYour status contains a WhatsApp group invite link. Please remove it to avoid issues.\n\n_NUTTER-XMD ⚡_`,
+              });
+            } catch (_) {}
+          }
         }
         continue;
       }
