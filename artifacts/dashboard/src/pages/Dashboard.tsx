@@ -136,8 +136,13 @@ export default function Dashboard() {
     }
   }
 
-  function startQRPoll(botId: string) {
+  async function startQRPoll(botId: string) {
     stopQRPoll(botId);
+    // Fetch immediately so QR appears right away, then keep polling every 2s
+    try {
+      const { qr } = await getQR(botId);
+      setQrImage(prev => ({ ...prev, [botId]: qr }));
+    } catch (_) {}
     qrPollRef.current[botId] = setInterval(async () => {
       try {
         const { qr } = await getQR(botId);
@@ -769,7 +774,7 @@ function BotCard({
           {linkMode === "qr" && !pairingCode && (
             <div>
               {!qrImage ? (
-                /* Connecting / loading state — shown while Baileys generates the QR */
+                /* Spinner shown while generating QR OR while reconnecting after scan */
                 <div style={{ textAlign: "center", padding: "1.25rem 0" }}>
                   <div style={{
                     display: "inline-block", width: 52, height: 52, borderRadius: "50%",
@@ -783,7 +788,7 @@ function BotCard({
                     Connecting to WhatsApp…
                   </div>
                   <div style={{ color: C.muted, fontSize: "0.78rem" }}>
-                    Generating QR code, usually takes 2–5 seconds
+                    Please wait, this usually takes a few seconds
                   </div>
                 </div>
               ) : (
@@ -846,7 +851,10 @@ function BotCard({
                     ⏱ {mins}:{secs.toString().padStart(2, "0")} remaining
                   </span>
                 ) : (
-                  <span style={{ color: "#ef4444", fontSize: "0.78rem" }}>Code expired — click Try again</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", color: "#a78bfa", fontSize: "0.78rem", fontWeight: 600 }}>
+                    <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", border: "2px solid rgba(167,139,250,0.25)", borderTop: "2px solid #a78bfa", animation: "spin 0.9s linear infinite" }} />
+                    Connecting to WhatsApp…
+                  </span>
                 )}
               </div>
               {/* Step-by-step guide */}

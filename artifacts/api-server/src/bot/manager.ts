@@ -506,31 +506,48 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
   botInstances.set(userId, instance);
   sock.ev.on("creds.update", saveCreds);
 
-  // connection.update handler — only needed for post-pairing lifecycle.
-  // requestPairingCode is called below once the socket is ready.
+  // Set when Baileys emits isNewLogin=true (pair-success IQ received after user
+  // enters the pairing code on their phone). WhatsApp then closes the stream with
+  // code 515 "Stream Errored (restart required)" — that is NOT a failure, it means
+  // we must reconnect with the now-paired credentials.
+  let pairSucceeded = false;
+
   sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, isNewLogin } = update;
+
+    if (isNewLogin) {
+      pairSucceeded = true;
+      logger.info({ userId }, "Pairing code accepted — awaiting stream reconnect...");
+    }
 
     if (connection === "close") {
       if (instance.paused) return;
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const wasConnected = instance.connected;
 
-      if (!wasConnected) {
+      if (wasConnected || pairSucceeded) {
+        // Either was fully open and dropped, OR just paired via code.
+        // Either way, reconnect with the saved (now-paired) credentials.
+        logger.info({ userId }, pairSucceeded && !wasConnected
+          ? "Pairing complete — reconnecting with paired credentials..."
+          : "Paired socket dropped — reconnecting..."
+        );
         instance.paused = true;
         botInstances.delete(userId);
-        logger.warn(
-          { userId, statusCode, rawError: (lastDisconnect?.error as Error)?.message },
-          "Pairing socket closed before link completed"
-        );
+        const attempts = reconnectAttempts.get(userId) ?? 0;
+        const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
+        reconnectAttempts.set(userId, attempts + 1);
+        setTimeout(() => createBotInstance(userId, sessionId, phone, false, true).catch(() => {}), delay);
         return;
       }
 
-      // Was fully linked — reconnect normally
-      const attempts = reconnectAttempts.get(userId) ?? 0;
-      const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
-      reconnectAttempts.set(userId, attempts + 1);
-      setTimeout(() => createBotInstance(userId, sessionId, phone, false, wasConnected).catch(() => {}), delay);
+      // Closed before pairing succeeded — clean up silently
+      instance.paused = true;
+      botInstances.delete(userId);
+      logger.warn(
+        { userId, statusCode, rawError: (lastDisconnect?.error as Error)?.message },
+        "Pairing socket closed before link completed"
+      );
     }
 
     if (connection === "open") {
