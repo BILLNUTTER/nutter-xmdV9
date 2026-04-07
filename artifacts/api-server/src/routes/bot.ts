@@ -162,6 +162,11 @@ router.post("/bots/:botId/pair", requireAuth, async (req: AuthRequest, res) => {
     return;
   }
 
+  if (bot.status === "suspended") {
+    res.status(403).json({ error: "This bot has been suspended by the admin. Contact support to reactivate it." });
+    return;
+  }
+
   const existing = botInstances.get(botId);
   if (existing?.connected) {
     res.json({ message: "Bot already connected" });
@@ -190,6 +195,11 @@ router.post("/bots/:botId/qr-start", requireAuth, async (req: AuthRequest, res) 
   const bot = await getBotForAccount(botId, accountId);
   if (!bot) {
     res.status(404).json({ error: "Bot not found" });
+    return;
+  }
+
+  if (bot.status === "suspended") {
+    res.status(403).json({ error: "This bot has been suspended by the admin. Contact support to reactivate it." });
     return;
   }
 

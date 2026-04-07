@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   adminLogin, adminGetAccounts, adminGetBotSettings,
-  adminSuspendBot, adminDeleteBot, adminDisconnectBot, adminDeleteAccount
+  adminSuspendBot, adminActivateBot, adminDeleteBot, adminDisconnectBot, adminDeleteAccount
 } from "@/lib/api";
 
 interface AdminBot {
@@ -23,7 +23,7 @@ interface AdminAccount {
 }
 
 interface ConfirmAction {
-  type: "disconnect" | "suspend" | "delete-bot" | "delete-account";
+  type: "disconnect" | "suspend" | "activate" | "delete-bot" | "delete-account";
   id: string;
   label: string;
 }
@@ -97,6 +97,7 @@ export default function Admin() {
     try {
       if (action.type === "disconnect") await adminDisconnectBot(token, action.id);
       if (action.type === "suspend") await adminSuspendBot(token, action.id);
+      if (action.type === "activate") await adminActivateBot(token, action.id);
       if (action.type === "delete-bot") await adminDeleteBot(token, action.id);
       if (action.type === "delete-account") await adminDeleteAccount(token, action.id);
       setSuccess(`Action completed: ${action.type}`);
@@ -220,8 +221,10 @@ export default function Admin() {
                               {bot.connected && (
                                 <button onClick={() => setConfirmAction({ type: "disconnect", id: bot.id, label: `bot "${bot.name}"` })} style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", color: "#fbbf24", borderRadius: "0.35rem", padding: "0.25rem 0.6rem", cursor: "pointer", fontSize: "0.75rem" }}>Disconnect</button>
                               )}
-                              {bot.status !== "suspended" && (
+                              {bot.status !== "suspended" ? (
                                 <button onClick={() => setConfirmAction({ type: "suspend", id: bot.id, label: `bot "${bot.name}"` })} style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#fca5a5", borderRadius: "0.35rem", padding: "0.25rem 0.6rem", cursor: "pointer", fontSize: "0.75rem" }}>Suspend</button>
+                              ) : (
+                                <button onClick={() => setConfirmAction({ type: "activate", id: bot.id, label: `bot "${bot.name}"` })} style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", color: "#86efac", borderRadius: "0.35rem", padding: "0.25rem 0.6rem", cursor: "pointer", fontSize: "0.75rem", fontWeight: 600 }}>✓ Activate</button>
                               )}
                               <button onClick={() => setConfirmAction({ type: "delete-bot", id: bot.id, label: `bot "${bot.name}"` })} style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", borderRadius: "0.35rem", padding: "0.25rem 0.6rem", cursor: "pointer", fontSize: "0.75rem", fontWeight: 600 }}>Delete Bot</button>
                             </div>
@@ -251,13 +254,27 @@ export default function Admin() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
           <div style={{ background: "#0d1a2e", border: "1px solid #1e3a5f", borderRadius: "1rem", padding: "2rem", maxWidth: 400, width: "100%", margin: "0 1rem" }}>
             <h3 style={{ color: "#e2e8f0", fontWeight: 700, marginBottom: "0.75rem", textTransform: "capitalize" }}>Confirm Action</h3>
-            <p style={{ color: "#94a3b8", marginBottom: "1.5rem" }}>
-              Are you sure you want to <strong style={{ color: "#e2e8f0" }}>{confirmAction.type.replace("-", " ")}</strong> {confirmAction.label}?
-              {(confirmAction.type === "delete-bot" || confirmAction.type === "delete-account") && " This cannot be undone."}
-            </p>
+            {confirmAction.type === "activate" ? (
+              <p style={{ color: "#94a3b8", marginBottom: "1.5rem" }}>
+                Activate {confirmAction.label}? The user will be able to link their bot again.
+              </p>
+            ) : (
+              <p style={{ color: "#94a3b8", marginBottom: "1.5rem" }}>
+                Are you sure you want to <strong style={{ color: "#e2e8f0" }}>{confirmAction.type.replace(/-/g, " ")}</strong> {confirmAction.label}?
+                {(confirmAction.type === "delete-bot" || confirmAction.type === "delete-account") && " This cannot be undone."}
+                {confirmAction.type === "suspend" && " The user will not be able to link until reactivated."}
+              </p>
+            )}
             <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
               <button onClick={() => setConfirmAction(null)} style={{ background: "rgba(71,85,105,0.3)", border: "1px solid #1e3a5f", color: "#94a3b8", borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => executeAction(confirmAction)} style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.35)", color: "#fca5a5", borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer", fontWeight: 600 }}>Confirm</button>
+              <button onClick={() => executeAction(confirmAction)} style={{
+                background: confirmAction.type === "activate" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                border: `1px solid ${confirmAction.type === "activate" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`,
+                color: confirmAction.type === "activate" ? "#86efac" : "#fca5a5",
+                borderRadius: "0.5rem", padding: "0.6rem 1.25rem", cursor: "pointer", fontWeight: 600
+              }}>
+                {confirmAction.type === "activate" ? "✓ Activate" : "Confirm"}
+              </button>
             </div>
           </div>
         </div>

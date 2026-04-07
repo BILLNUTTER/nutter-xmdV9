@@ -207,6 +207,10 @@ export async function adminSuspendBot(token: string, id: string): Promise<unknow
   return adminFetch(`${BASE}/admin/bots/${id}/suspend`, { method: "POST", headers: adminH(token) });
 }
 
+export async function adminActivateBot(token: string, id: string): Promise<unknown> {
+  return adminFetch(`${BASE}/admin/bots/${id}/activate`, { method: "POST", headers: adminH(token) });
+}
+
 export async function adminDeleteBot(token: string, id: string): Promise<unknown> {
   return adminFetch(`${BASE}/admin/bots/${id}`, { method: "DELETE", headers: adminH(token) });
 }

@@ -4,6 +4,7 @@ import { usersTable, userSettingsTable, accountsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { botInstances, disconnectBotInstance, deleteBotSession } from "../bot/manager.js";
 import { stopPresence } from "../bot/presence.js";
+import { clearDatabaseSession } from "../bot/db-auth-state.js";
 
 const router = Router();
 
@@ -166,15 +167,29 @@ router.post("/admin/bots/:id/disconnect", requireAdmin, async (req: Request<{ id
 
 router.post("/admin/bots/:id/suspend", requireAdmin, async (req: Request<{ id: string }>, res) => {
   const { id } = req.params;
-  await db.update(usersTable).set({ status: "suspended" }).where(eq(usersTable.id, id));
+  await db.update(usersTable).set({ status: "suspended", lastSeen: new Date() }).where(eq(usersTable.id, id));
   await disconnectBotInstance(id);
   stopPresence(id);
   res.json({ success: true });
 });
 
+router.post("/admin/bots/:id/activate", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const { id } = req.params;
+  const [bot] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!bot) {
+    res.status(404).json({ error: "Bot not found" });
+    return;
+  }
+  await db.update(usersTable).set({ status: "active" }).where(eq(usersTable.id, id));
+  res.json({ success: true });
+});
+
 router.delete("/admin/bots/:id", requireAdmin, async (req: Request<{ id: string }>, res) => {
   const { id } = req.params;
+  const [bot] = await db.select().from(usersTable).where(eq(usersTable.id, id));
   await deleteBotSession(id);
+  // Also clear the DB session row by sessionId — covers the case where no active instance exists
+  if (bot?.sessionId) await clearDatabaseSession(bot.sessionId);
   stopPresence(id);
   await db.delete(userSettingsTable).where(eq(userSettingsTable.userId, id));
   await db.delete(usersTable).where(eq(usersTable.id, id));
@@ -186,6 +201,8 @@ router.delete("/admin/accounts/:id", requireAdmin, async (req: Request<{ id: str
   const bots = await db.select().from(usersTable).where(eq(usersTable.accountId, id));
   for (const bot of bots) {
     await deleteBotSession(bot.id);
+    // Also clear the DB session row by sessionId — covers the case where no active instance exists
+    if (bot.sessionId) await clearDatabaseSession(bot.sessionId);
     stopPresence(bot.id);
     await db.delete(userSettingsTable).where(eq(userSettingsTable.userId, bot.id));
     await db.delete(usersTable).where(eq(usersTable.id, bot.id));
