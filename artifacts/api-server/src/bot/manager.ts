@@ -9,8 +9,6 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { v4 as uuidv4 } from "uuid";
-import { join } from "path";
-import { rmSync } from "fs";
 import QRCode from "qrcode";
 import { db } from "@workspace/db";
 import { usersTable, userSettingsTable, messagesTable } from "@workspace/db";
@@ -20,10 +18,9 @@ import { handleCommand } from "./commands/index.js";
 import { handleProtection } from "./protection.js";
 import { handlePresence } from "./presence.js";
 import { getCachedSettings, invalidateSettingsCache } from "./settings-cache.js";
-import { useFilesystemAuthState, hasStoredSession } from "./db-auth-state.js";
+import { useDatabaseAuthState, hasStoredSession, clearDatabaseSession } from "./db-auth-state.js";
 import pino from "pino";
 
-const AUTH_DIR = join(process.cwd(), "sessions");
 const MAX_RETRIES = 5;
 const RECONNECT_DELAYS = [5_000, 10_000, 20_000, 40_000, 80_000];
 const QR_SESSION_TIMEOUT_MS = 5 * 60 * 1000;
@@ -33,6 +30,7 @@ const LAST_SEEN_DEBOUNCE_MS = 15_000;
 export interface BotInstance {
   socket: WASocket;
   userId: string;
+  sessionId: string;
   phone: string | null;
   paused: boolean;
   connected: boolean;
@@ -353,6 +351,7 @@ async function onLinkingConnected(
 
 export async function createBotInstance(
   userId: string,
+  sessionId: string,
   phone: string | null,
   isFirstConnection: boolean,
   silentStart = false
@@ -376,10 +375,10 @@ export async function createBotInstance(
   creatingInstances.add(userId);
   try {
     const version = await getBaileysVersion();
-    const { state, saveCreds } = await useFilesystemAuthState(userId);
+    const { state, saveCreds } = await useDatabaseAuthState(sessionId);
     const sock = makeSocket(version, state);
 
-    const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
+    const instance: BotInstance = { socket: sock, userId, sessionId, phone, paused: false, connected: false };
     botInstances.set(userId, instance);
     sock.ev.on("creds.update", saveCreds);
 
@@ -429,7 +428,7 @@ export async function createBotInstance(
         const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
         reconnectAttempts.set(userId, attempts + 1);
         logger.info({ userId, attempt: attempts + 1, delay }, "Reconnecting bot...");
-        setTimeout(() => createBotInstance(userId, phone, false, true).catch(() => {}), delay);
+        setTimeout(() => createBotInstance(userId, sessionId, phone, false, true).catch(() => {}), delay);
       }
 
       if (connection === "open") {
@@ -486,7 +485,7 @@ export async function createBotInstance(
   }
 }
 
-export async function initiatePairing(userId: string, phone: string): Promise<string> {
+export async function initiatePairing(userId: string, sessionId: string, phone: string): Promise<string> {
   return new Promise(async (resolve, reject) => {
     const existing = botInstances.get(userId);
     if (existing) {
@@ -497,9 +496,6 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
     creatingInstances.delete(userId);
     pendingQRCodes.delete(userId);
 
-    // Clear any stored filesystem session so the new pairing starts fresh
-    try { rmSync(join(AUTH_DIR, userId), { recursive: true, force: true }); } catch (_) {}
-
     let version: [number, number, number];
     try {
       version = await getBaileysVersion();
@@ -508,9 +504,9 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       return;
     }
 
-    const { state, saveCreds } = await useFilesystemAuthState(userId);
+    const { state, saveCreds } = await useDatabaseAuthState(sessionId);
     const sock = makeSocket(version, state);
-    const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
+    const instance: BotInstance = { socket: sock, userId, sessionId, phone, paused: false, connected: false };
     botInstances.set(userId, instance);
     sock.ev.on("creds.update", saveCreds);
 
@@ -553,7 +549,7 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
         const attempts = reconnectAttempts.get(userId) ?? 0;
         const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
         reconnectAttempts.set(userId, attempts + 1);
-        setTimeout(() => createBotInstance(userId, phone, false, wasConnected).catch(() => {}), delay);
+        setTimeout(() => createBotInstance(userId, sessionId, phone, false, wasConnected).catch(() => {}), delay);
       }
 
       if (connection === "open") {
@@ -564,7 +560,7 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
   });
 }
 
-export async function initiateQR(userId: string): Promise<void> {
+export async function initiateQR(userId: string, sessionId: string): Promise<void> {
   clearQRTimeout(userId);
 
   const existing = botInstances.get(userId);
@@ -576,14 +572,11 @@ export async function initiateQR(userId: string): Promise<void> {
   creatingInstances.delete(userId);
   pendingQRCodes.delete(userId);
 
-  // Clear any stored filesystem session so the new QR scan starts fresh
-  try { rmSync(join(AUTH_DIR, userId), { recursive: true, force: true }); } catch (_) {}
-
   const version = await getBaileysVersion();
-  const { state, saveCreds } = await useFilesystemAuthState(userId);
+  const { state, saveCreds } = await useDatabaseAuthState(sessionId);
   const sock = makeSocket(version, state);
 
-  const instance: BotInstance = { socket: sock, userId, phone: null, paused: false, connected: false };
+  const instance: BotInstance = { socket: sock, userId, sessionId, phone: null, paused: false, connected: false };
   botInstances.set(userId, instance);
   sock.ev.on("creds.update", saveCreds);
 
@@ -631,14 +624,14 @@ export async function initiateQR(userId: string): Promise<void> {
         const attempts = reconnectAttempts.get(userId) ?? 0;
         const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
         reconnectAttempts.set(userId, attempts + 1);
-        setTimeout(() => createBotInstance(userId, null, false, true).catch(() => {}), delay);
+        setTimeout(() => createBotInstance(userId, sessionId, null, false, true).catch(() => {}), delay);
         return;
       }
 
       if (isLoggedOut) return;
 
       logger.info({ userId }, "QR socket closed, re-initiating...");
-      setTimeout(() => initiateQR(userId).catch(() => {}), 3000);
+      setTimeout(() => initiateQR(userId, sessionId).catch(() => {}), 3000);
     }
 
     if (connection === "open") {
@@ -664,8 +657,10 @@ export async function deleteBotSession(userId: string): Promise<void> {
   }
 
   pendingQRCodes.delete(userId);
-  // Remove filesystem session files
-  try { rmSync(join(AUTH_DIR, userId), { recursive: true, force: true }); } catch (_) {}
+  // Clear session from the database (bot_sessions table)
+  if (instance?.sessionId) {
+    await clearDatabaseSession(instance.sessionId);
+  }
 }
 
 export async function pauseBotInstance(userId: string): Promise<void> {
@@ -702,12 +697,13 @@ const RESTORE_BATCH_DELAY_MS = 3_000;
 export async function restoreAllSessions(): Promise<void> {
   const users = await db.select().from(usersTable).where(eq(usersTable.status, "active"));
 
-  // Filter to only bots that have a session_id marker AND a creds.json on disk
+  // Filter to only bots that have a session_id marker AND stored creds in bot_sessions
   const restorable: typeof users = [];
   for (const user of users) {
     if (!user.sessionId) continue;
-    if (hasStoredSession(user.id)) restorable.push(user);
-    else logger.info({ userId: user.id }, "Skipping restore — no session files on disk");
+    const stored = await hasStoredSession(user.sessionId);
+    if (stored) restorable.push(user);
+    else logger.info({ userId: user.id }, "Skipping restore — no stored session in DB");
   }
 
   logger.info({ total: restorable.length, batchSize: RESTORE_BATCH_SIZE }, "Restoring bot sessions in batches...");
@@ -717,7 +713,7 @@ export async function restoreAllSessions(): Promise<void> {
     await Promise.allSettled(
       batch.map((user) => {
         logger.info({ userId: user.id, phone: user.phone }, "Restoring session...");
-        return createBotInstance(user.id, user.phone, false, true).catch((err) =>
+        return createBotInstance(user.id, user.sessionId!, user.phone, false, true).catch((err) =>
           logger.error({ err, userId: user.id }, "Failed to restore session")
         );
       })

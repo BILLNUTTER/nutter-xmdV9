@@ -12,6 +12,7 @@ import {
   deleteBotSession,
   disconnectBotInstance,
 } from "../bot/manager.js";
+import { clearDatabaseSession } from "../bot/db-auth-state.js";
 import { stopPresence } from "../bot/presence.js";
 import { invalidateSettingsCache, setSettingsCache } from "../bot/settings-cache.js";
 
@@ -89,7 +90,7 @@ router.post("/bots", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.delete("/bots/:botId", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
 
   const bot = await getBotForAccount(botId, accountId);
@@ -99,6 +100,11 @@ router.delete("/bots/:botId", requireAuth, async (req: AuthRequest, res) => {
   }
 
   await deleteBotSession(botId);
+  // Also clear the DB session row using sessionId from the bot record (covers the
+  // case where no active instance is running so deleteBotSession can't get it).
+  if (bot.sessionId) {
+    await clearDatabaseSession(bot.sessionId);
+  }
   stopPresence(botId);
   await db.delete(userSettingsTable).where(eq(userSettingsTable.userId, botId));
   await db.delete(usersTable).where(eq(usersTable.id, botId));
@@ -107,7 +113,7 @@ router.delete("/bots/:botId", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.patch("/bots/:botId/name", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
   const { name } = req.body as { name: string };
 
@@ -131,7 +137,7 @@ router.patch("/bots/:botId/name", requireAuth, async (req: AuthRequest, res) => 
 });
 
 router.post("/bots/:botId/pair", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
   const { phone } = req.body as { phone: string };
 
@@ -163,7 +169,7 @@ router.post("/bots/:botId/pair", requireAuth, async (req: AuthRequest, res) => {
   }
 
   try {
-    const code = await initiatePairing(botId, cleanPhone);
+    const code = await initiatePairing(botId, bot.sessionId!, cleanPhone);
     await db.update(usersTable).set({ linkedAt: new Date() }).where(eq(usersTable.id, botId));
     res.json({ code });
   } catch (err) {
@@ -173,7 +179,7 @@ router.post("/bots/:botId/pair", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.post("/bots/:botId/qr-start", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
 
   if (!checkRateLimit(`qr:${accountId}`, 4, 60_000)) {
@@ -193,13 +199,13 @@ router.post("/bots/:botId/qr-start", requireAuth, async (req: AuthRequest, res) 
     return;
   }
 
-  initiateQR(botId).catch(() => {});
+  initiateQR(botId, bot.sessionId!).catch(() => {});
   await db.update(usersTable).set({ linkedAt: new Date() }).where(eq(usersTable.id, botId));
   res.json({ success: true, message: "QR session started" });
 });
 
 router.get("/bots/:botId/qr", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
 
   const bot = await getBotForAccount(botId, accountId);
@@ -215,7 +221,7 @@ router.get("/bots/:botId/qr", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.get("/bots/:botId/status", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
 
   const bot = await getBotForAccount(botId, accountId);
@@ -235,7 +241,7 @@ router.get("/bots/:botId/status", requireAuth, async (req: AuthRequest, res) => 
 });
 
 router.get("/bots/:botId/settings", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
 
   const bot = await getBotForAccount(botId, accountId);
@@ -253,7 +259,7 @@ router.get("/bots/:botId/settings", requireAuth, async (req: AuthRequest, res) =
 });
 
 router.patch("/bots/:botId/settings", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
 
   const bot = await getBotForAccount(botId, accountId);
@@ -298,7 +304,7 @@ router.patch("/bots/:botId/settings", requireAuth, async (req: AuthRequest, res)
 });
 
 router.post("/bots/:botId/disconnect", requireAuth, async (req: AuthRequest, res) => {
-  const { botId } = req.params;
+  const { botId } = req.params as { botId: string };
   const accountId = req.accountId!;
 
   const bot = await getBotForAccount(botId, accountId);

@@ -72,6 +72,30 @@ export async function runMigrations(): Promise<void> {
       );
     `);
 
+    // bot_sessions: stores WhatsApp auth state keyed on users.session_id
+    // so bots reconnect automatically after server restarts without re-pairing.
+    // If the table was created with the old 'bot_id' primary key, rename it first.
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'bot_sessions' AND column_name = 'bot_id'
+        ) THEN
+          ALTER TABLE bot_sessions RENAME COLUMN bot_id TO session_id;
+        END IF;
+      END;
+      $$;
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS bot_sessions (
+        session_id  text      PRIMARY KEY,
+        creds       jsonb,
+        keys        jsonb     NOT NULL DEFAULT '{}'::jsonb,
+        updated_at  timestamp NOT NULL DEFAULT NOW()
+      );
+    `);
+
     logger.info("DB migrations complete");
   } catch (err) {
     logger.error({ err }, "DB migration failed");
