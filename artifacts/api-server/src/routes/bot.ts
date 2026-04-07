@@ -168,14 +168,27 @@ router.post("/bots/:botId/pair", requireAuth, async (req: AuthRequest, res) => {
     return;
   }
 
-  try {
-    const code = await initiatePairing(botId, bot.sessionId!, cleanPhone);
-    await db.update(usersTable).set({ linkedAt: new Date() }).where(eq(usersTable.id, botId));
-    res.json({ code });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to generate pairing code";
-    res.status(500).json({ error: message });
+  // Retry up to 2 extra times on transient "Connection lost" failures.
+  // WhatsApp's servers occasionally reset the initial WebSocket during peak
+  // load; a brief back-off is usually sufficient to recover.
+  const MAX_PAIR_ATTEMPTS = 3;
+  let lastErr: Error | null = null;
+  for (let attempt = 1; attempt <= MAX_PAIR_ATTEMPTS; attempt++) {
+    try {
+      const code = await initiatePairing(botId, bot.sessionId!, cleanPhone);
+      await db.update(usersTable).set({ linkedAt: new Date() }).where(eq(usersTable.id, botId));
+      res.json({ code });
+      return;
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error("Failed to generate pairing code");
+      const msg = lastErr.message ?? "";
+      const isTransient = /connection lost|timed out|connection|network/i.test(msg);
+      if (!isTransient || attempt === MAX_PAIR_ATTEMPTS) break;
+      // Wait briefly before the next attempt
+      await new Promise(r => setTimeout(r, 2000 * attempt));
+    }
   }
+  res.status(500).json({ error: lastErr?.message ?? "Failed to generate pairing code" });
 });
 
 router.post("/bots/:botId/qr-start", requireAuth, async (req: AuthRequest, res) => {

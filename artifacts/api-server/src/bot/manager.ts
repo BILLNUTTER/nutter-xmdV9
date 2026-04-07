@@ -511,7 +511,10 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
 
     pendingPairings.set(userId, { resolve, reject });
 
-    setTimeout(async () => {
+    // Track this timer so we can cancel it if the connection drops before it fires.
+    // Without this, a stale timer from a failed attempt fires during the next retry
+    // and incorrectly rejects the new attempt's pending promise.
+    const pairCodeTimer = setTimeout(async () => {
       try {
         const cleanPhone = phone.replace(/[^0-9]/g, "");
         logger.info({ userId, cleanPhone }, "Requesting pairing code...");
@@ -564,15 +567,21 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
           // Connection dropped before the user entered the pairing code.
           // Do NOT attempt createBotInstance — there are no credentials stored
           // yet so it would reconnect with blank auth and enter an infinite loop.
-          // Clean up and let the user retry from the dashboard.
+          // Clear both timers so stale callbacks can't fire into the next retry.
+          clearTimeout(pairCodeTimer);
           clearTimeout(pairingTimeout);
           const pending = pendingPairings.get(userId);
           if (pending) {
-            pending.reject(new Error(`Connection lost (code ${statusCode ?? "?"}), please try again`));
+            const rawMsg = (lastDisconnect?.error as Error)?.message ?? "";
+            const detail = rawMsg ? ` (${rawMsg})` : statusCode ? ` (code ${statusCode})` : "";
+            pending.reject(new Error(`Connection lost${detail} — please try again`));
             pendingPairings.delete(userId);
           }
           botInstances.delete(userId);
-          logger.warn({ userId, statusCode }, "Pairing socket closed before link completed — user must retry");
+          logger.warn(
+            { userId, statusCode, rawError: (lastDisconnect?.error as Error)?.message },
+            "Pairing socket closed before link completed — route will retry"
+          );
           return;
         }
 
