@@ -138,9 +138,7 @@ export async function handleCommand(
       return;
     }
 
-    await sock.sendMessage(chatId, {
-      text: `❓ Unknown command: *${prefix}${command}*\n\nType *${prefix}menu* to see all commands.\n\n_NUTTER-XMD ⚡_`,
-    }, { quoted: msg }).catch(() => {});
+    // Unknown command — stay silent (prefix but unrecognised word)
   } catch (err) {
     logger.error({ err, command }, "Command error");
   } finally {

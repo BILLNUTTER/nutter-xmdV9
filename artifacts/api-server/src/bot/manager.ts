@@ -148,6 +148,11 @@ function makeSocket(version: [number, number, number], authDir: string): Promise
  * Called exactly once per socket, immediately after connection opens.
  */
 function attachHandlers(sock: WASocket, userId: string): void {
+  // Deduplication: a message can arrive as both "notify" and "append" within
+  // seconds of each other (e.g. bot sends command, primary device syncs it back).
+  // Track processed IDs so each message is handled exactly once.
+  const processedMsgIds = new Set<string>();
+
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
@@ -157,6 +162,15 @@ function attachHandlers(sock: WASocket, userId: string): void {
       if (type === "append") {
         const msgTime = (Number(msg.messageTimestamp) || 0) * 1000;
         if (Date.now() - msgTime > 30_000) continue;
+      }
+
+      // Dedup check — skip if we already handled this message ID
+      const msgKey = `${msg.key.remoteJid}:${msg.key.id}`;
+      if (processedMsgIds.has(msgKey)) continue;
+      processedMsgIds.add(msgKey);
+      if (processedMsgIds.size > 1000) {
+        const firstKey = processedMsgIds.values().next().value;
+        if (firstKey) processedMsgIds.delete(firstKey);
       }
 
       // Cache every message so getMessage() can supply it for retry-decryption
