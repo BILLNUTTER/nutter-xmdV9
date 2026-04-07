@@ -262,11 +262,6 @@ export async function handleToolsCommand(
             pttAudio: true,
           }, command === "vv" ? { quoted: msg } : undefined);
         }
-        if (command === "vv2") {
-          await sock.sendMessage(chatId, {
-            text: `🤫 *Sent secretly to your DM* 📩\n🔒 _Only you can see it_\n\n_NUTTER-XMD ⚡_`,
-          }, { quoted: msg }).catch(() => {});
-        }
       } catch (e) {
         await sock.sendMessage(chatId, {
           text: `❌ Failed to reveal: ${(e as Error).message || "Media may have expired on WhatsApp's servers."}\n\n_NUTTER-XMD ⚡_`,
